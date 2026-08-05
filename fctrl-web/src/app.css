@@ -1,0 +1,123 @@
+/* The four status hues plus focus, identical to the TUI and the mockups. */
+:root,
+[data-theme='dark'] {
+  --bg: #0e0f12;
+  --panel: #14161a;
+  --panel2: #16181c;
+  --hover: #191c21;
+  --border: #24272e;
+  --border2: #1c1f24;
+  --fg: #e6e8ec;
+  --fg2: #8a909b;
+  --fg3: #565c66;
+  --accent: #5ad1e6;
+  --accent-fg: #0e0f12;
+  --ready: #3ecf8e;
+  --blocked: #ef6a5a;
+  --deferred: #7c8394;
+  --done: #3f6b8f;
+  --ready-bg: #132a22;
+  --blocked-bg: #2a1a17;
+  --chip: #1c1f25;
+  --track: #1f2228;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  --hue-auth: #5ad1e6;
+  --hue-booking: #c58af9;
+  --hue-pay: #8fd15a;
+  --hue-obs: #e86a9b;
+  --hue-ui: #f0a35e;
+}
+
+[data-theme='light'] {
+  --bg: #f6f6f4;
+  --panel: #ffffff;
+  --panel2: #ffffff;
+  --hover: #f2f1ed;
+  --border: #e2e1dc;
+  --border2: #eeede8;
+  --fg: #16181b;
+  --fg2: #6d6c66;
+  --fg3: #8b8a83;
+  --accent: #0f7a8c;
+  --accent-fg: #ffffff;
+  --ready: #1f9d6b;
+  --blocked: #d8593f;
+  --deferred: #9c9a92;
+  --done: #2f6f8f;
+  --ready-bg: #e6f4ee;
+  --blocked-bg: #fbeae5;
+  --chip: #f0efeb;
+  --track: #e7e6e1;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.16);
+  --hue-auth: #0f7a8c;
+  --hue-booking: #7b4fc0;
+  --hue-pay: #4d8b2b;
+  --hue-obs: #b8437a;
+  --hue-ui: #b3701f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  opacity: 0.8;
+}
+
+.mono {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+.ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg3);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
