@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app, load, toggleTheme } from '../lib/state.svelte';
+  import logo from '../assets/logo-mark-dark.svg';
 
   const abbr = (name: string) =>
     name
@@ -10,7 +11,7 @@
 </script>
 
 <div class="rail">
-  <div class="logo mono">fc</div>
+  <img class="logo" src={logo} alt="FlowControl" />
   <div class="hr"></div>
   {#each app.projects as p (p.id)}
     <button
@@ -40,15 +41,9 @@
     gap: 9px;
   }
   .logo {
-    width: 28px;
-    height: 28px;
-    border-radius: 7px;
-    background: var(--accent);
-    color: var(--accent-fg);
-    display: grid;
-    place-items: center;
-    font-weight: 600;
-    font-size: 13px;
+    width: 26px;
+    height: 26px;
+    display: block;
   }
   .hr {
     width: 26px;
