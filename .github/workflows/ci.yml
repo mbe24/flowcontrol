@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+jobs:
+  web:
+    name: Web (fctrl-web · check · build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: fctrl-web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: fctrl-web
+        run: npm ci
+
+      - name: Type + Svelte check
+        working-directory: fctrl-web
+        run: npm run check
+
+      - name: Build
+        working-directory: fctrl-web
+        run: npm run build
+
+  go:
+    name: Go TUI (fctrl · vet · build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: fctrl/go.mod
+
+      - name: Vet
+        working-directory: fctrl
+        run: go vet ./...
+
+      - name: Build
+        working-directory: fctrl
+        run: go build ./...

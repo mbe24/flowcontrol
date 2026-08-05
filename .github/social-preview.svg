@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-label="flowcontrol — dependency-aware task graphs">
+  <title>flowcontrol — GitHub social preview</title>
+  <defs>
+    <pattern id="dots" width="32" height="32" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#24272e"></circle>
+    </pattern>
+    <radialGradient id="glow" cx="76%" cy="44%" r="60%">
+      <stop offset="0%" stop-color="#5ad1e6" stop-opacity="0.10"></stop>
+      <stop offset="70%" stop-color="#5ad1e6" stop-opacity="0"></stop>
+    </radialGradient>
+    
+  </defs>
+
+  <rect width="1280" height="640" fill="#0e0f12"></rect>
+  <rect width="1280" height="640" fill="url(#dots)" opacity="0.55"></rect>
+  <rect width="1280" height="640" fill="url(#glow)"></rect>
+
+  
+  <g>
+    <rect x="706" y="118" width="236" height="186" rx="16" fill="#5ad1e6" fill-opacity="0.05" stroke="#5ad1e6" stroke-opacity="0.5"></rect>
+    <rect x="4" y="0" width="0" height="0"></rect>
+    <rect x="20" y="0" width="0" height="0"></rect>
+    <g transform="translate(720,106)">
+      <rect x="0" y="-8" width="3" height="14" rx="1.5" fill="#5ad1e6"></rect>
+      <text x="12" y="4" class="sans" font-size="14" font-weight="600" fill="#e6e8ec">Authentication</text>
+      <rect x="118" y="-8" width="56" height="15" rx="3" fill="#132a22"></rect>
+      <text x="124" y="4" class="mono" font-size="10" font-weight="500" fill="#3ecf8e">ACTIVE</text>
+    </g>
+
+    <rect x="968" y="310" width="250" height="186" rx="16" fill="#c58af9" fill-opacity="0.05" stroke="#c58af9" stroke-opacity="0.5"></rect>
+    <g transform="translate(982,298)">
+      <rect x="0" y="-8" width="3" height="14" rx="1.5" fill="#c58af9"></rect>
+      <text x="12" y="4" class="sans" font-size="14" font-weight="600" fill="#e6e8ec">Booking</text>
+      <rect x="80" y="-8" width="56" height="15" rx="3" fill="#132a22"></rect>
+      <text x="86" y="4" class="mono" font-size="10" font-weight="500" fill="#3ecf8e">ACTIVE</text>
+    </g>
+
+    <path d="M870,170 L894,170" fill="none" stroke="#3f6b8f" stroke-width="1.6" opacity="0.75"></path>
+    <path d="M782,192 L782,226" fill="none" stroke="#3ecf8e" stroke-width="1.6"></path>
+    <path d="M870,248 C918,284 934,354 968,394" fill="none" stroke="#ef6a5a" stroke-width="1.6"></path>
+    <path d="M1044,384 L1044,418" fill="none" stroke="#ef6a5a" stroke-width="1.6"></path>
+    <circle cx="894" cy="170" r="3" fill="#3f6b8f" opacity="0.75"></circle>
+    <circle cx="782" cy="226" r="3" fill="#3ecf8e"></circle>
+    <circle cx="968" cy="394" r="3" fill="#ef6a5a"></circle>
+    <circle cx="1044" cy="418" r="3" fill="#ef6a5a"></circle>
+
+    <g>
+      <rect x="726" y="148" width="144" height="44" rx="9" fill="#14161a" stroke="#24272e"></rect>
+      <circle cx="738" cy="161" r="3" fill="#3f6b8f"></circle>
+      <text x="748" y="164" class="mono" font-size="9.5" fill="#565c66">T-1041</text>
+      <text x="844" y="164" class="mono" font-size="9" fill="#565c66">3/3</text>
+      <text x="735" y="182" class="sans" font-size="11" fill="#565c66">Session store on Redis</text>
+    </g>
+    <g>
+      <rect x="726" y="226" width="144" height="44" rx="9" fill="#14161a" stroke="#5ad1e6"></rect>
+      <circle cx="738" cy="239" r="3" fill="#3ecf8e"></circle>
+      <text x="748" y="242" class="mono" font-size="9.5" fill="#8a909b">T-1042</text>
+      <text x="844" y="242" class="mono" font-size="9" fill="#565c66">2/5</text>
+      <text x="735" y="260" class="sans" font-size="11" fill="#e6e8ec">OAuth2 device-code flow</text>
+    </g>
+    <g>
+      <rect x="894" y="148" width="144" height="44" rx="9" fill="#14161a" stroke="#24272e"></rect>
+      <circle cx="906" cy="161" r="3" fill="#ef6a5a"></circle>
+      <text x="916" y="164" class="mono" font-size="9.5" fill="#8a909b">T-1043</text>
+      <text x="903" y="182" class="sans" font-size="11" fill="#b7bdc7">Token rotation</text>
+    </g>
+    <g>
+      <rect x="988" y="340" width="144" height="44" rx="9" fill="#14161a" stroke="#24272e"></rect>
+      <circle cx="1000" cy="353" r="3" fill="#ef6a5a"></circle>
+      <text x="1010" y="356" class="mono" font-size="9.5" fill="#8a909b">T-2011</text>
+      <text x="997" y="374" class="sans" font-size="11" fill="#b7bdc7">Hold-and-confirm</text>
+    </g>
+    <g>
+      <rect x="988" y="418" width="144" height="44" rx="9" fill="#14161a" stroke="#24272e"></rect>
+      <circle cx="1000" cy="431" r="3" fill="#ef6a5a"></circle>
+      <text x="1010" y="434" class="mono" font-size="9.5" fill="#8a909b">T-2012</text>
+      <text x="997" y="452" class="sans" font-size="11" fill="#b7bdc7">Idempotency keys</text>
+    </g>
+
+    <g>
+      <rect x="838" y="332" width="104" height="19" rx="9.5" fill="#14161a" stroke="#7c8394" stroke-dasharray="4 3"></rect>
+      <text x="848" y="345" class="mono" font-size="9.5" fill="#8a909b">cross-package</text>
+    </g>
+  </g>
+
+  
+  <g transform="translate(80,150)">
+    <g fill="none" stroke="#5ad1e6" stroke-width="4.5" stroke-linecap="butt">
+      <path d="M33.39,43.31 L62.93,28.53"></path>
+      <path d="M33.39,52.69 L62.93,67.47"></path>
+    </g>
+    <circle cx="24" cy="48" r="12" fill="#5ad1e6"></circle>
+    <circle cx="72" cy="24" r="12" fill="none" stroke="#5ad1e6" stroke-width="4"></circle>
+    <circle cx="72" cy="72" r="12" fill="none" stroke="#5ad1e6" stroke-width="4"></circle>
+    <text x="118" y="58" class="sans" font-size="76" font-weight="600" letter-spacing="-2.6" fill="#e6e8ec">flow<tspan opacity="0.5" font-weight="400">control</tspan></text>
+    <text x="120" y="88" class="mono" font-size="20" font-weight="500" fill="#5ad1e6">fctrl</text>
+  </g>
+
+  <text x="80" y="330" class="sans" font-size="29" fill="#8a909b">Dependency-aware task graphs for</text>
+  <text x="80" y="369" class="sans" font-size="29" fill="#8a909b">humans <tspan fill="#e6e8ec">and the agents working</tspan></text>
+  <text x="80" y="408" class="sans" font-size="29" fill="#e6e8ec">alongside them.</text>
+
+  <g>
+    <rect x="80" y="446" width="96" height="36" rx="8" fill="none" stroke="#24272e"></rect>
+    <text x="96" y="469" class="mono" font-size="15" fill="#8a909b">web app</text>
+    <rect x="186" y="446" width="128" height="36" rx="8" fill="none" stroke="#24272e"></rect>
+    <text x="202" y="469" class="mono" font-size="15" fill="#8a909b">terminal UI</text>
+    <rect x="324" y="446" width="128" height="36" rx="8" fill="none" stroke="#24272e"></rect>
+    <text x="340" y="469" class="mono" font-size="15" fill="#8a909b">MCP server</text>
+  </g>
+
+  <g>
+    <rect x="80" y="551" width="8" height="8" rx="2" fill="#3ecf8e"></rect>
+    <text x="97" y="560" class="mono" font-size="14" fill="#3ecf8e">READY</text>
+    <rect x="176" y="551" width="8" height="8" rx="2" fill="#ef6a5a"></rect>
+    <text x="193" y="560" class="mono" font-size="14" fill="#ef6a5a">BLOCKED</text>
+    <rect x="300" y="551" width="8" height="8" rx="2" fill="#7c8394"></rect>
+    <text x="317" y="560" class="mono" font-size="14" fill="#7c8394">DEFERRED</text>
+    <rect x="440" y="551" width="8" height="8" rx="2" fill="#3f6b8f"></rect>
+    <text x="457" y="560" class="mono" font-size="14" fill="#3f6b8f">DONE</text>
+  </g>
+
+  <g>
+    <rect x="0" y="635" width="563" height="5" fill="#3f6b8f"></rect>
+    <rect x="563" y="635" width="154" height="5" fill="#3ecf8e"></rect>
+    <rect x="717" y="635" width="486" height="5" fill="#ef6a5a"></rect>
+    <rect x="1203" y="635" width="77" height="5" fill="#7c8394"></rect>
+  </g>
+</svg>
