@@ -1,24 +1,35 @@
 <script lang="ts">
   import { app, select, setStatus, undo, verify } from '../lib/state.svelte';
   import { buildIndex, ownerTask, stepRatio, stepsOf } from '../lib/derive';
-  import { ALL_STATUSES, STATUS_VAR, stepGlyph, verifyGlyph, verifyText } from '../lib/types';
+  import {
+    ALL_STATUSES,
+    STATUS_VAR,
+    stepGlyph,
+    verifyGlyph,
+    verifyText,
+  } from '../lib/types';
 
   const index = $derived(buildIndex(app.nodes, app.deps));
   const raw = $derived(app.nodes.find((n) => n.id === app.selectedId));
   const node = $derived(raw ? ownerTask(index, raw) : undefined);
-  const wp = $derived(node?.parentId ? index.byId.get(node.parentId) : undefined);
+  const wp = $derived(
+    node?.parentId ? index.byId.get(node.parentId) : undefined,
+  );
   const steps = $derived(node ? stepsOf(app.nodes, node.id) : []);
   const ratio = $derived(node ? stepRatio(app.nodes, node.id) : { label: '–' });
   const v = $derived(verifyGlyph(node?.lastResult ?? 'none'));
-  const blockers = $derived(node ? index.blockers.get(node.id) ?? [] : []);
-  const blocks = $derived(node ? index.blocks.get(node.id) ?? [] : []);
+  const blockers = $derived(node ? (index.blockers.get(node.id) ?? []) : []);
+  const blocks = $derived(node ? (index.blocks.get(node.id) ?? []) : []);
 </script>
 
 {#if node}
   <aside class="panel">
     <header>
       <div class="crumb">
-        <span class="mono">{app.projects.find((p) => p.id === app.projectId)?.name} / {wp?.title} / {node.id}</span>
+        <span class="mono"
+          >{app.projects.find((p) => p.id === app.projectId)?.name} / {wp?.title}
+          / {node.id}</span
+        >
         <button class="x" onclick={() => select(null)}>✕</button>
       </div>
       <div class="title">
@@ -31,7 +42,8 @@
             class="sbtn"
             class:on={node.status === s}
             style:--hue={STATUS_VAR[s]}
-            onclick={() => setStatus(node.id, s)}>{s}</button>
+            onclick={() => setStatus(node.id, s)}>{s}</button
+          >
         {/each}
       </div>
     </header>
@@ -48,18 +60,25 @@
         <span class="label">Condition</span>
         <div class="condrow">
           <div class="mono field">{node.condition || 'none set'}</div>
-          <button class="verify" disabled={app.verifying || !node.condition} onclick={() => verify(node.id)}>
+          <button
+            class="verify"
+            disabled={app.verifying || !node.condition}
+            onclick={() => verify(node.id)}
+          >
             {app.verifying ? 'Running…' : 'Verify'}
           </button>
         </div>
         <div
           class="result"
-          style:border-color={node.lastResult === 'none' ? 'var(--border)' : v.color}
+          style:border-color={node.lastResult === 'none'
+            ? 'var(--border)'
+            : v.color}
           style:background={node.lastResult === 'pass'
             ? 'var(--ready-bg)'
             : node.lastResult === 'fail'
               ? 'var(--blocked-bg)'
-              : 'var(--panel2)'}>
+              : 'var(--panel2)'}
+        >
           <span class="mono" style:color={v.color}>{v.glyph}</span>
           <span style:color={v.color}>{verifyText(node.lastResult)}</span>
           <span class="mono when">{node.lastRun || '—'}</span>
@@ -74,12 +93,19 @@
           </div>
           {#each steps as s (s.id)}
             <div class="step">
-              <span class="mono glyph" style:color={STATUS_VAR[s.status]}>{stepGlyph(s.status)}</span>
+              <span class="mono glyph" style:color={STATUS_VAR[s.status]}
+                >{stepGlyph(s.status)}</span
+              >
               <div class="stepbody">
-                <span style:color={s.status === 'DONE' ? 'var(--fg3)' : 'var(--fg)'}>{s.title}</span>
+                <span
+                  style:color={s.status === 'DONE' ? 'var(--fg3)' : 'var(--fg)'}
+                  >{s.title}</span
+                >
                 <span class="mono cond">{s.condition || 'no condition'}</span>
               </div>
-              <span class="mono sstatus" style:color={STATUS_VAR[s.status]}>{s.status}</span>
+              <span class="mono sstatus" style:color={STATUS_VAR[s.status]}
+                >{s.status}</span
+              >
             </div>
           {/each}
         </section>
@@ -92,9 +118,14 @@
             {@const o = index.byId.get(id)}
             <button class="dep" onclick={() => o && select(o.id)}>
               <span class="mono dir">blocked by</span>
-              <span class="dot small" style:background={o ? STATUS_VAR[o.status] : 'var(--fg3)'}></span>
+              <span
+                class="dot small"
+                style:background={o ? STATUS_VAR[o.status] : 'var(--fg3)'}
+              ></span>
               <span class="mono did">{id}</span>
-              <span class="ellipsis dtitle">{o?.title ?? 'outside this project'}</span>
+              <span class="ellipsis dtitle"
+                >{o?.title ?? 'outside this project'}</span
+              >
               {#if o && o.type === 'TASK' && o.parentId !== node.parentId}
                 <span class="note">cross-pkg</span>
               {/if}
@@ -104,17 +135,22 @@
             {@const o = index.byId.get(id)}
             <button class="dep" onclick={() => o && select(o.id)}>
               <span class="mono dir">blocks</span>
-              <span class="dot small" style:background={o ? STATUS_VAR[o.status] : 'var(--fg3)'}></span>
+              <span
+                class="dot small"
+                style:background={o ? STATUS_VAR[o.status] : 'var(--fg3)'}
+              ></span>
               <span class="mono did">{id}</span>
-              <span class="ellipsis dtitle">{o?.title ?? 'outside this project'}</span>
+              <span class="ellipsis dtitle"
+                >{o?.title ?? 'outside this project'}</span
+              >
               {#if o && o.type === 'TASK' && o.parentId !== node.parentId}
                 <span class="note">cross-pkg</span>
               {/if}
             </button>
           {/each}
           <p class="fine">
-            Cross-level edges roll up to one package edge in the graph, badged with how many real
-            dependencies it stands for.
+            Cross-level edges roll up to one package edge in the graph, badged
+            with how many real dependencies it stands for.
           </p>
         </section>
       {/if}

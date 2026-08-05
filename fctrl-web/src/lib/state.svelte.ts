@@ -30,7 +30,7 @@ export const app = $state({
   expandedTask: { 'T-1042': true } as Record<string, boolean>,
 
   verifying: false,
-  flash: ''
+  flash: '',
 });
 
 export async function boot() {
@@ -46,11 +46,15 @@ export async function load(projectId: string) {
   app.loading = true;
   app.projectId = projectId;
   try {
-    const [nodes, deps] = await Promise.all([store.nodes(projectId), store.dependencies(projectId)]);
+    const [nodes, deps] = await Promise.all([
+      store.nodes(projectId),
+      store.dependencies(projectId),
+    ]);
     app.nodes = nodes;
     app.deps = deps;
     for (const n of nodes) {
-      if (n.type === 'WORK_PACKAGE' && n.state === 'ACTIVE') app.expandedWp[n.id] = true;
+      if (n.type === 'WORK_PACKAGE' && n.state === 'ACTIVE')
+        app.expandedWp[n.id] = true;
     }
     if (app.selectedId && !nodes.some((n) => n.id === app.selectedId)) {
       app.selectedId = nodes.find((n) => n.type === 'TASK')?.id ?? null;
@@ -63,7 +67,10 @@ export async function load(projectId: string) {
 }
 
 async function refresh() {
-  const [nodes, deps] = await Promise.all([store.nodes(app.projectId), store.dependencies(app.projectId)]);
+  const [nodes, deps] = await Promise.all([
+    store.nodes(app.projectId),
+    store.dependencies(app.projectId),
+  ]);
   app.nodes = nodes;
   app.deps = deps;
 }

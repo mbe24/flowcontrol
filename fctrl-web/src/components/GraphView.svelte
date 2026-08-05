@@ -7,32 +7,45 @@
     new Set(
       app.nodes
         .filter((n) => n.type === 'WORK_PACKAGE' && app.expandedWp[n.id])
-        .map((n) => n.id)
-    )
+        .map((n) => n.id),
+    ),
   );
   const graph = $derived(layoutGraph(app.nodes, app.deps, expandedWps));
 
   const stroke = (kind: string) =>
-    kind === 'satisfied' ? 'var(--done)' : kind === 'rollup' ? 'var(--deferred)' : 'var(--blocked)';
+    kind === 'satisfied'
+      ? 'var(--done)'
+      : kind === 'rollup'
+        ? 'var(--deferred)'
+        : 'var(--blocked)';
 </script>
 
 <div class="toolbar">
   <span class="note">
-    {graph.clusters.length} expanded · {graph.boxes.length} collapsed · rollup edges on
+    {graph.clusters.length} expanded · {graph.boxes.length} collapsed · rollup edges
+    on
   </span>
   <div class="spacer"></div>
   <span class="note">Zoom</span>
   <div class="zoom">
     <button>−</button><span class="mono">100%</span><button>+</button>
   </div>
-  <button class="toggle" class:on={app.editMode} onclick={() => (app.editMode = !app.editMode)}>
+  <button
+    class="toggle"
+    class:on={app.editMode}
+    onclick={() => (app.editMode = !app.editMode)}
+  >
     <span class="dot"></span>{app.editMode ? 'Editing edges' : 'Edit mode'}
   </button>
 </div>
 
 <div class="canvas">
   <div class="grid"></div>
-  <div class="inner" style:width="{graph.width}px" style:height="{graph.height}px">
+  <div
+    class="inner"
+    style:width="{graph.width}px"
+    style:height="{graph.height}px"
+  >
     <svg width={graph.width} height={graph.height}>
       {#each graph.edges as e (e.id)}
         <path
@@ -41,8 +54,15 @@
           style:stroke={stroke(e.kind)}
           style:stroke-width={e.kind === 'rollup' ? '1.4px' : '1.6px'}
           style:stroke-dasharray={e.kind === 'rollup' ? '5 4' : 'none'}
-          style:opacity={e.kind === 'satisfied' ? 0.6 : 0.9} />
-        <circle cx={e.tx} cy={e.ty} r="3" style:fill={stroke(e.kind)} style:opacity={e.kind === 'satisfied' ? 0.6 : 0.9} />
+          style:opacity={e.kind === 'satisfied' ? 0.6 : 0.9}
+        />
+        <circle
+          cx={e.tx}
+          cy={e.ty}
+          r="3"
+          style:fill={stroke(e.kind)}
+          style:opacity={e.kind === 'satisfied' ? 0.6 : 0.9}
+        />
       {/each}
     </svg>
 
@@ -54,17 +74,20 @@
         style:width="{c.w}px"
         style:height="{c.h}px"
         style:border-color={c.hue}
-        style:background="color-mix(in oklab, {c.hue} 5%, transparent)">
-      </div>
+        style:background="color-mix(in oklab, {c.hue} 5%, transparent)"
+      ></div>
       <button
         class="clusterlabel"
         style:left="{c.x + 12}px"
         style:top="{c.y - 24}px"
-        onclick={() => toggleWp(c.wp.id)}>
+        onclick={() => toggleWp(c.wp.id)}
+      >
         <span class="bar" style:background={c.hue}></span>
         <span class="name">{c.wp.title}</span>
         <span class="mono state">{c.wp.state}</span>
-        <span class="mono ratio">{c.counts.done}/{c.counts.total} · {c.counts.pct}%</span>
+        <span class="mono ratio"
+          >{c.counts.done}/{c.counts.total} · {c.counts.pct}%</span
+        >
       </button>
     {/each}
 
@@ -75,17 +98,31 @@
         style:top="{b.y}px"
         style:width="{b.w}px"
         style:--hue={b.hue}
-        onclick={() => toggleWp(b.wp.id)}>
+        onclick={() => toggleWp(b.wp.id)}
+      >
         <div class="boxhead">
           <span class="ellipsis">{b.wp.title}</span>
           <span class="mono pct">{b.counts.pct}%</span>
         </div>
         <div class="track">
-          <div style:width="{(b.counts.done / Math.max(b.counts.total, 1)) * 100}%" style:background="var(--done)"></div>
-          <div style:width="{(b.counts.ready / Math.max(b.counts.total, 1)) * 100}%" style:background="var(--ready)"></div>
-          <div style:width="{(b.counts.blocked / Math.max(b.counts.total, 1)) * 100}%" style:background="var(--blocked)"></div>
+          <div
+            style:width="{(b.counts.done / Math.max(b.counts.total, 1)) * 100}%"
+            style:background="var(--done)"
+          ></div>
+          <div
+            style:width="{(b.counts.ready / Math.max(b.counts.total, 1)) *
+              100}%"
+            style:background="var(--ready)"
+          ></div>
+          <div
+            style:width="{(b.counts.blocked / Math.max(b.counts.total, 1)) *
+              100}%"
+            style:background="var(--blocked)"
+          ></div>
         </div>
-        <span class="meta">{b.counts.total} nodes · {b.wp.state?.toLowerCase()}</span>
+        <span class="meta"
+          >{b.counts.total} nodes · {b.wp.state?.toLowerCase()}</span
+        >
       </button>
     {/each}
 
@@ -97,13 +134,19 @@
         style:top="{n.y}px"
         style:width="{n.w}px"
         style:height="{n.h}px"
-        onclick={() => select(n.node.id)}>
+        onclick={() => select(n.node.id)}
+      >
         <div class="gmeta">
           <span class="dot" style:background={STATUS_VAR[n.node.status]}></span>
           <span class="mono id">{n.node.id}</span>
           <span class="mono steps">{n.steps}</span>
         </div>
-        <div class="gtitle" style:color={n.node.status === 'DONE' ? 'var(--fg3)' : 'var(--fg)'}>{n.node.title}</div>
+        <div
+          class="gtitle"
+          style:color={n.node.status === 'DONE' ? 'var(--fg3)' : 'var(--fg)'}
+        >
+          {n.node.title}
+        </div>
         {#if app.editMode}
           <span class="port left"></span>
           <span class="port right"></span>
@@ -112,14 +155,21 @@
     {/each}
 
     {#each graph.edges.filter((e) => e.label) as e (e.id + '-badge')}
-      <span class="badge mono" style:left="{e.mx - 60}px" style:top="{e.my - 9}px">{e.label}</span>
+      <span
+        class="badge mono"
+        style:left="{e.mx - 60}px"
+        style:top="{e.my - 9}px">{e.label}</span
+      >
     {/each}
   </div>
 
   <div class="legend">
     <span class="label">Edges</span>
     <span><i style:border-color="var(--blocked)"></i>hard dependency</span>
-    <span><i class="dash" style:border-color="var(--deferred)"></i>rolled-up package edge</span>
+    <span
+      ><i class="dash" style:border-color="var(--deferred)"></i>rolled-up
+      package edge</span
+    >
     <span><i style:border-color="var(--done)"></i>satisfied</span>
   </div>
 </div>
@@ -197,7 +247,11 @@
     position: absolute;
     inset: 0;
     opacity: 0.5;
-    background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+    background-image: radial-gradient(
+      circle,
+      var(--border) 1px,
+      transparent 1px
+    );
     background-size: 26px 26px;
     pointer-events: none;
   }

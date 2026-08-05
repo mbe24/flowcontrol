@@ -11,14 +11,19 @@ export function buildIndex(nodes: FlowNode[], deps: Dependency[]): Index {
   const blockers = new Map<string, string[]>();
   const blocks = new Map<string, string[]>();
   for (const d of deps) {
-    blockers.set(d.blockedId, [...(blockers.get(d.blockedId) ?? []), d.blockerId]);
+    blockers.set(d.blockedId, [
+      ...(blockers.get(d.blockedId) ?? []),
+      d.blockerId,
+    ]);
     blocks.set(d.blockerId, [...(blocks.get(d.blockerId) ?? []), d.blockedId]);
   }
   return { byId, blockers, blocks };
 }
 
 export const workPackages = (nodes: FlowNode[]) =>
-  nodes.filter((n) => n.type === 'WORK_PACKAGE').sort((a, b) => statePriority(a) - statePriority(b));
+  nodes
+    .filter((n) => n.type === 'WORK_PACKAGE')
+    .sort((a, b) => statePriority(a) - statePriority(b));
 
 export const tasksOf = (nodes: FlowNode[], wpId: string) =>
   nodes.filter((n) => n.type === 'TASK' && n.parentId === wpId);
@@ -49,7 +54,14 @@ export interface Counts {
 }
 
 export function countStatuses(nodes: FlowNode[]): Counts {
-  const c: Counts = { done: 0, ready: 0, blocked: 0, deferred: 0, total: 0, pct: 0 };
+  const c: Counts = {
+    done: 0,
+    ready: 0,
+    blocked: 0,
+    deferred: 0,
+    total: 0,
+    pct: 0,
+  };
   for (const n of nodes) {
     c.total++;
     if (n.status === 'DONE') c.done++;
@@ -77,13 +89,26 @@ export function projectCounts(nodes: FlowNode[]): Counts {
   return countStatuses(nodes.filter((n) => n.type !== 'WORK_PACKAGE'));
 }
 
-export function stepRatio(nodes: FlowNode[], taskId: string): { done: number; total: number; label: string } {
+export function stepRatio(
+  nodes: FlowNode[],
+  taskId: string,
+): { done: number; total: number; label: string } {
   const steps = stepsOf(nodes, taskId);
   const done = steps.filter((s) => s.status === 'DONE').length;
-  return { done, total: steps.length, label: steps.length ? `${done}/${steps.length}` : '–' };
+  return {
+    done,
+    total: steps.length,
+    label: steps.length ? `${done}/${steps.length}` : '–',
+  };
 }
 
-const HUES = ['var(--hue-auth)', 'var(--hue-booking)', 'var(--hue-pay)', 'var(--hue-obs)', 'var(--hue-ui)'];
+const HUES = [
+  'var(--hue-auth)',
+  'var(--hue-booking)',
+  'var(--hue-pay)',
+  'var(--hue-obs)',
+  'var(--hue-ui)',
+];
 
 export function hueOf(nodes: FlowNode[], wpId: string): string {
   const i = workPackages(nodes).findIndex((w) => w.id === wpId);
@@ -166,7 +191,11 @@ const CLUSTER_X = LEFT_COL + BOX_W + 76;
  * that cannot be drawn task-to-task roll up into one dashed package edge,
  * badged with how many real edges it stands for.
  */
-export function layoutGraph(nodes: FlowNode[], deps: Dependency[], expandedWps: Set<string>): Graph {
+export function layoutGraph(
+  nodes: FlowNode[],
+  deps: Dependency[],
+  expandedWps: Set<string>,
+): Graph {
   const index = buildIndex(nodes, deps);
   const wps = workPackages(nodes);
   const expanded = wps.filter((w) => expandedWps.has(w.id));
@@ -186,7 +215,9 @@ export function layoutGraph(nodes: FlowNode[], deps: Dependency[], expandedWps: 
       if (seen.has(id)) return 0;
       seen.add(id);
       const ups = (index.blockers.get(id) ?? []).filter((b) => own.has(b));
-      const d = ups.length ? Math.max(...ups.map((b) => depthOf(b, seen) + 1)) : 0;
+      const d = ups.length
+        ? Math.max(...ups.map((b) => depthOf(b, seen) + 1))
+        : 0;
       depth.set(id, d);
       return d;
     };
@@ -199,11 +230,23 @@ export function layoutGraph(nodes: FlowNode[], deps: Dependency[], expandedWps: 
     }
     const colKeys = [...cols.keys()].sort((a, b) => a - b);
     const rows = Math.max(1, ...colKeys.map((k) => cols.get(k)!.length));
-    const w = PAD * 2 + colKeys.length * NODE_W + Math.max(0, colKeys.length - 1) * COL_GAP;
-    const h = HEADER + PAD + rows * NODE_H + Math.max(0, rows - 1) * ROW_GAP + PAD - 8;
+    const w =
+      PAD * 2 +
+      colKeys.length * NODE_W +
+      Math.max(0, colKeys.length - 1) * COL_GAP;
+    const h =
+      HEADER + PAD + rows * NODE_H + Math.max(0, rows - 1) * ROW_GAP + PAD - 8;
     const hue = hueOf(nodes, wp.id);
 
-    clusters.push({ wp, hue, counts: wpCounts(nodes, wp.id), x: CLUSTER_X, y: cy, w, h });
+    clusters.push({
+      wp,
+      hue,
+      counts: wpCounts(nodes, wp.id),
+      x: CLUSTER_X,
+      y: cy,
+      w,
+      h,
+    });
 
     colKeys.forEach((k, ci) => {
       cols.get(k)!.forEach((t, ri) => {
@@ -211,10 +254,15 @@ export function layoutGraph(nodes: FlowNode[], deps: Dependency[], expandedWps: 
           x: CLUSTER_X + PAD + ci * (NODE_W + COL_GAP),
           y: cy + HEADER + ri * (NODE_H + ROW_GAP),
           w: NODE_W,
-          h: NODE_H
+          h: NODE_H,
         };
         nodeRect.set(t.id, r);
-        gnodes.push({ ...r, node: t, hue, steps: stepRatio(nodes, t.id).label });
+        gnodes.push({
+          ...r,
+          node: t,
+          hue,
+          steps: stepRatio(nodes, t.id).label,
+        });
       });
     });
 
@@ -228,14 +276,16 @@ export function layoutGraph(nodes: FlowNode[], deps: Dependency[], expandedWps: 
     x: LEFT_COL,
     y: 40 + i * (BOX_H + BOX_GAP),
     w: BOX_W,
-    h: BOX_H
+    h: BOX_H,
   }));
 
   const clusterRect = new Map(clusters.map((c) => [c.wp.id, c as Rect]));
   const boxRect = new Map(boxes.map((b) => [b.wp.id, b as Rect]));
 
   /** Where does this node id appear on the canvas, and as what? */
-  const resolve = (id: string): { key: string; rect: Rect; task: boolean } | null => {
+  const resolve = (
+    id: string,
+  ): { key: string; rect: Rect; task: boolean } | null => {
     const n = index.byId.get(id);
     if (!n) return null;
     if (n.type === 'TASK') {
@@ -254,7 +304,10 @@ export function layoutGraph(nodes: FlowNode[], deps: Dependency[], expandedWps: 
   };
 
   const edges: GraphEdge[] = [];
-  const rollups = new Map<string, { from: Rect; to: Rect; count: number; fromKey: string; toKey: string }>();
+  const rollups = new Map<
+    string,
+    { from: Rect; to: Rect; count: number; fromKey: string; toKey: string }
+  >();
 
   for (const d of deps) {
     const a = resolve(d.blockerId);
@@ -269,7 +322,7 @@ export function layoutGraph(nodes: FlowNode[], deps: Dependency[], expandedWps: 
         kind,
         from: d.blockerId,
         to: d.blockedId,
-        ...p
+        ...p,
       });
     } else {
       const key = `${a.key}=>${b.key}`;
@@ -279,7 +332,7 @@ export function layoutGraph(nodes: FlowNode[], deps: Dependency[], expandedWps: 
         to: b.rect,
         count: (cur?.count ?? 0) + 1,
         fromKey: a.key,
-        toKey: b.key
+        toKey: b.key,
       });
     }
   }
@@ -292,23 +345,26 @@ export function layoutGraph(nodes: FlowNode[], deps: Dependency[], expandedWps: 
       from: r.fromKey,
       to: r.toKey,
       label: `via ${r.count} ${r.count === 1 ? 'task dep' : 'task deps'} ▸`,
-      ...p
+      ...p,
     });
   }
 
   const width = Math.max(
     CLUSTER_X + Math.max(0, ...clusters.map((c) => c.w)) + 60,
-    LEFT_COL + BOX_W + 40
+    LEFT_COL + BOX_W + 40,
   );
   const height = Math.max(
     cy + 20,
-    boxes.length ? boxes[boxes.length - 1].y + BOX_H + 40 : 0
+    boxes.length ? boxes[boxes.length - 1].y + BOX_H + 40 : 0,
   );
   return { width, height, clusters, nodes: gnodes, boxes, edges };
 }
 
 /** Cubic path between two rects, entering and leaving on facing edges. */
-function path(a: Rect, b: Rect): { d: string; tx: number; ty: number; mx: number; my: number } {
+function path(
+  a: Rect,
+  b: Rect,
+): { d: string; tx: number; ty: number; mx: number; my: number } {
   let x1: number, y1: number, x2: number, y2: number, horizontal: boolean;
 
   if (b.x >= a.x + a.w - 4) {

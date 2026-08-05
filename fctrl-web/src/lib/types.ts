@@ -40,7 +40,7 @@ export const STATUS_VAR: Record<Status, string> = {
   READY: 'var(--ready)',
   BLOCKED: 'var(--blocked)',
   DEFERRED: 'var(--deferred)',
-  DONE: 'var(--done)'
+  DONE: 'var(--done)',
 };
 
 export function stepGlyph(s: Status): string {

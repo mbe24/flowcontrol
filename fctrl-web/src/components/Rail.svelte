@@ -17,7 +17,8 @@
       class="proj mono"
       class:active={p.id === app.projectId}
       title={p.name}
-      onclick={() => load(p.id)}>{abbr(p.name)}</button>
+      onclick={() => load(p.id)}>{abbr(p.name)}</button
+    >
   {/each}
   <button class="proj plus" title="New project">+</button>
   <div class="spacer"></div>

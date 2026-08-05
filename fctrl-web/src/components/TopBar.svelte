@@ -5,7 +5,9 @@
 
   const views: ViewName[] = ['table', 'lanes', 'graph'];
   const counts = $derived(projectCounts(app.nodes));
-  const projectName = $derived(app.projects.find((p) => p.id === app.projectId)?.name ?? '—');
+  const projectName = $derived(
+    app.projects.find((p) => p.id === app.projectId)?.name ?? '—',
+  );
   const pct = (n: number) => (counts.total ? (n / counts.total) * 100 : 0);
 </script>
 
@@ -17,7 +19,11 @@
 
   <div class="tabs">
     {#each views as v}
-      <button class="tab" class:on={app.view === v} onclick={() => (app.view = v)}>
+      <button
+        class="tab"
+        class:on={app.view === v}
+        onclick={() => (app.view = v)}
+      >
         {v[0].toUpperCase() + v.slice(1)}
       </button>
     {/each}
@@ -25,10 +31,22 @@
 
   <div class="progress">
     <div class="track">
-      <div style:width="{pct(counts.done)}%" style:background="var(--done)"></div>
-      <div style:width="{pct(counts.ready)}%" style:background="var(--ready)"></div>
-      <div style:width="{pct(counts.blocked)}%" style:background="var(--blocked)"></div>
-      <div style:width="{pct(counts.deferred)}%" style:background="var(--deferred)"></div>
+      <div
+        style:width="{pct(counts.done)}%"
+        style:background="var(--done)"
+      ></div>
+      <div
+        style:width="{pct(counts.ready)}%"
+        style:background="var(--ready)"
+      ></div>
+      <div
+        style:width="{pct(counts.blocked)}%"
+        style:background="var(--blocked)"
+      ></div>
+      <div
+        style:width="{pct(counts.deferred)}%"
+        style:background="var(--deferred)"
+      ></div>
     </div>
     <span class="mono ratio">{counts.pct}% · {counts.done}/{counts.total}</span>
   </div>

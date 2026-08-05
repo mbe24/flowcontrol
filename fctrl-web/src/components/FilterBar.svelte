@@ -6,10 +6,18 @@
   const counts = $derived(projectCounts(app.nodes));
   const wps = $derived(workPackages(app.nodes));
   const active = $derived(wps.filter((w) => w.state === 'ACTIVE').length);
-  const doneWps = $derived(wps.filter((w) => w.state === 'DONE' || w.state === 'ARCHIVED').length);
+  const doneWps = $derived(
+    wps.filter((w) => w.state === 'DONE' || w.state === 'ARCHIVED').length,
+  );
 
   const countFor = (s: string) =>
-    s === 'READY' ? counts.ready : s === 'BLOCKED' ? counts.blocked : s === 'DEFERRED' ? counts.deferred : counts.done;
+    s === 'READY'
+      ? counts.ready
+      : s === 'BLOCKED'
+        ? counts.blocked
+        : s === 'DEFERRED'
+          ? counts.deferred
+          : counts.done;
 </script>
 
 <div class="bar">
@@ -18,9 +26,11 @@
       class="chip"
       class:on={app.statusFilter.includes(s)}
       style:--hue={STATUS_VAR[s]}
-      onclick={() => toggleFilter(s)}>
+      onclick={() => toggleFilter(s)}
+    >
       <span class="dot"></span>
-      {s[0] + s.slice(1).toLowerCase()} {countFor(s)}
+      {s[0] + s.slice(1).toLowerCase()}
+      {countFor(s)}
     </button>
   {/each}
   <div class="spacer"></div>

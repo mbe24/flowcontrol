@@ -6,7 +6,14 @@
 
   const index = $derived(buildIndex(app.nodes, app.deps));
 
-  type Hit = { kind: 'task' | 'step' | 'cmd'; id: string; title: string; hint: string; status?: Status; run: () => void };
+  type Hit = {
+    kind: 'task' | 'step' | 'cmd';
+    id: string;
+    title: string;
+    hint: string;
+    status?: Status;
+    run: () => void;
+  };
 
   const results = $derived.by((): Hit[] => {
     const q = app.paletteQuery.trim().toLowerCase();
@@ -23,9 +30,9 @@
         hint: parent?.title ?? '',
         status: n.status,
         run: () => {
-          select(n.type === 'STEP' ? n.parentId ?? n.id : n.id);
+          select(n.type === 'STEP' ? (n.parentId ?? n.id) : n.id);
           app.paletteOpen = false;
-        }
+        },
       });
       if (hits.length >= 8) break;
     }
@@ -40,7 +47,7 @@
           run: () => {
             if (app.selectedId) setStatus(app.selectedId, s);
             app.paletteOpen = false;
-          }
+          },
         });
       }
     }
@@ -62,11 +69,24 @@
   }
 
   const glyph = (h: Hit) =>
-    h.kind === 'cmd' ? '⌘' : h.kind === 'step' ? stepGlyph(h.status ?? 'READY') : '●';
+    h.kind === 'cmd'
+      ? '⌘'
+      : h.kind === 'step'
+        ? stepGlyph(h.status ?? 'READY')
+        : '●';
 </script>
 
-<div class="scrim" onclick={() => (app.paletteOpen = false)} role="presentation">
-  <div class="palette" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
+<div
+  class="scrim"
+  onclick={() => (app.paletteOpen = false)}
+  role="presentation"
+>
+  <div
+    class="palette"
+    onclick={(e) => e.stopPropagation()}
+    role="dialog"
+    tabindex="-1"
+  >
     <div class="input">
       <span class="mono caret">›</span>
       <!-- svelte-ignore a11y_autofocus -->
@@ -75,12 +95,18 @@
         bind:value={app.paletteQuery}
         onkeydown={onKeydown}
         placeholder="task, step or command"
-        autofocus />
+        autofocus
+      />
       <span class="mono count">{results.length} results</span>
     </div>
     <div class="list">
       {#each results as h, i (h.kind + h.id + h.title)}
-        <button class="hit" class:on={i === cursor} onmouseenter={() => (cursor = i)} onclick={h.run}>
+        <button
+          class="hit"
+          class:on={i === cursor}
+          onmouseenter={() => (cursor = i)}
+          onclick={h.run}
+        >
           <span class="mono kind">{glyph(h)}</span>
           <span class="mono id">{h.id}</span>
           <span class="ellipsis title">{h.title}</span>
@@ -88,11 +114,15 @@
         </button>
       {/each}
       {#if results.length === 0}
-        <div class="empty">Search tasks, steps and commands — try “rotate”.</div>
+        <div class="empty">
+          Search tasks, steps and commands — try “rotate”.
+        </div>
       {/if}
     </div>
     <div class="foot mono">
-      <span>↵ open</span><span>⌘↵ set status</span><span>⇥ filter by package</span>
+      <span>↵ open</span><span>⌘↵ set status</span><span
+        >⇥ filter by package</span
+      >
       <span class="spacer"></span><span>esc close</span>
     </div>
   </div>

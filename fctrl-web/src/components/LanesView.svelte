@@ -5,7 +5,8 @@
 
   const index = $derived(buildIndex(app.nodes, app.deps));
   const tasks = $derived(app.nodes.filter((n) => n.type === 'TASK'));
-  const wpName = (parentId: string | null) => (parentId ? index.byId.get(parentId)?.title ?? '' : '');
+  const wpName = (parentId: string | null) =>
+    parentId ? (index.byId.get(parentId)?.title ?? '') : '';
 </script>
 
 <div class="lanes">
@@ -25,23 +26,37 @@
             class="card"
             class:selected={app.selectedId === t.id}
             style:--hue={hue}
-            onclick={() => select(t.id)}>
+            onclick={() => select(t.id)}
+          >
             <div class="meta">
               <span class="mono id">{t.id}</span>
               <span class="wp ellipsis">{wpName(t.parentId)}</span>
             </div>
-            <div class="title" style:color={status === 'DONE' ? 'var(--fg2)' : 'var(--fg)'}>{t.title}</div>
+            <div
+              class="title"
+              style:color={status === 'DONE' ? 'var(--fg2)' : 'var(--fg)'}
+            >
+              {t.title}
+            </div>
             <div class="foot">
               {#each index.blockers.get(t.id) ?? [] as b}
                 {@const bn = index.byId.get(b)}
                 <span class="mono bchip">
-                  <span class="tinydot" style:background={bn ? STATUS_VAR[bn.status] : 'var(--fg3)'}></span>{b}
+                  <span
+                    class="tinydot"
+                    style:background={bn ? STATUS_VAR[bn.status] : 'var(--fg3)'}
+                  ></span>{b}
                 </span>
               {/each}
               <span class="spacer"></span>
               <span class="dots">
                 {#each steps as s (s.id)}
-                  <span class="sdot" style:background={s.status === 'DONE' ? 'var(--ready)' : 'var(--border)'}></span>
+                  <span
+                    class="sdot"
+                    style:background={s.status === 'DONE'
+                      ? 'var(--ready)'
+                      : 'var(--border)'}
+                  ></span>
                 {/each}
               </span>
             </div>

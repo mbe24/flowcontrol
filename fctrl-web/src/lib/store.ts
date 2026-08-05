@@ -1,4 +1,10 @@
-import type { Dependency, FlowNode, Project, Status, VerifyResult } from './types';
+import type {
+  Dependency,
+  FlowNode,
+  Project,
+  Status,
+  VerifyResult,
+} from './types';
 
 /**
  * The seam between the UI and the engine. MemoryStore implements it now; a
