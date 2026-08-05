@@ -1,21 +1,39 @@
 <script lang="ts">
-  import { app, select, toggleTask, toggleWp, passesFilter } from '../lib/state.svelte';
-  import { buildIndex, stepRatio, stepsOf, tasksOf, workPackages, wpCounts } from '../lib/derive';
+  import {
+    app,
+    select,
+    toggleTask,
+    toggleWp,
+    passesFilter,
+  } from '../lib/state.svelte';
+  import {
+    buildIndex,
+    stepRatio,
+    stepsOf,
+    tasksOf,
+    workPackages,
+    wpCounts,
+  } from '../lib/derive';
   import { STATUS_VAR, stepGlyph, verifyGlyph } from '../lib/types';
 
   const index = $derived(buildIndex(app.nodes, app.deps));
   const wps = $derived(
-    workPackages(app.nodes).filter((w) => app.showArchived || (w.state !== 'DONE' && w.state !== 'ARCHIVED'))
+    workPackages(app.nodes).filter(
+      (w) => app.showArchived || (w.state !== 'DONE' && w.state !== 'ARCHIVED'),
+    ),
   );
   const hidden = $derived(
-    workPackages(app.nodes).filter((w) => w.state === 'DONE' || w.state === 'ARCHIVED').length
+    workPackages(app.nodes).filter(
+      (w) => w.state === 'DONE' || w.state === 'ARCHIVED',
+    ).length,
   );
 
   const pct = (n: number, total: number) => (total ? (n / total) * 100 : 0);
 </script>
 
 <div class="head">
-  <span></span><span>Node</span><span>Blocked by</span><span>Condition</span><span>Steps</span>
+  <span></span><span>Node</span><span>Blocked by</span><span>Condition</span
+  ><span>Steps</span>
   <span class="right">Status</span>
 </div>
 
@@ -30,14 +48,29 @@
         <span
           class="mono state"
           style:color={wp.state === 'ACTIVE' ? 'var(--ready)' : 'var(--fg2)'}
-          style:background={wp.state === 'ACTIVE' ? 'var(--ready-bg)' : 'var(--chip)'}>{wp.state}</span>
+          style:background={wp.state === 'ACTIVE'
+            ? 'var(--ready-bg)'
+            : 'var(--chip)'}>{wp.state}</span
+        >
       </div>
       <div class="wpbar">
         <div class="track">
-          <div style:width="{pct(counts.done, counts.total)}%" style:background="var(--done)"></div>
-          <div style:width="{pct(counts.ready, counts.total)}%" style:background="var(--ready)"></div>
-          <div style:width="{pct(counts.blocked, counts.total)}%" style:background="var(--blocked)"></div>
-          <div style:width="{pct(counts.deferred, counts.total)}%" style:background="var(--deferred)"></div>
+          <div
+            style:width="{pct(counts.done, counts.total)}%"
+            style:background="var(--done)"
+          ></div>
+          <div
+            style:width="{pct(counts.ready, counts.total)}%"
+            style:background="var(--ready)"
+          ></div>
+          <div
+            style:width="{pct(counts.blocked, counts.total)}%"
+            style:background="var(--blocked)"
+          ></div>
+          <div
+            style:width="{pct(counts.deferred, counts.total)}%"
+            style:background="var(--deferred)"
+          ></div>
         </div>
         <span class="mono ratio">{counts.done}/{counts.total}</span>
         <span class="mono pct">{counts.pct}%</span>
@@ -45,34 +78,44 @@
     </div>
 
     {#if app.expandedWp[wp.id]}
-      {#each tasksOf(app.nodes, wp.id).filter((t) => passesFilter(t.status)) as t (t.id)}
+      {#each tasksOf(app.nodes, wp.id).filter( (t) => passesFilter(t.status) ) as t (t.id)}
         {@const ratio = stepRatio(app.nodes, t.id)}
         {@const v = verifyGlyph(t.lastResult)}
         {@const blockers = index.blockers.get(t.id) ?? []}
         <div
           class="row"
           class:selected={app.selectedId === t.id}
-          onclick={() => select(t.id)}
+          onclick={(e) => {
+            toggleTask(t.id);
+            select(t.id);
+          }}
           role="button"
-          tabindex="0">
-          <span
-            class="caret sub"
-            onclick={(e) => {
-              e.stopPropagation();
-              toggleTask(t.id);
-            }}
-            role="button"
-            tabindex="-1">{stepsOf(app.nodes, t.id).length ? (app.expandedTask[t.id] ? '▾' : '▸') : ''}</span>
+          tabindex="0"
+        >
+          <span class="caret sub"
+            >{stepsOf(app.nodes, t.id).length
+              ? app.expandedTask[t.id]
+                ? '▾'
+                : '▸'
+              : ''}</span
+          >
           <div class="node">
             <span class="dot" style:background={STATUS_VAR[t.status]}></span>
             <span class="mono nid">{t.id}</span>
-            <span class="ellipsis" style:color={t.status === 'DONE' ? 'var(--fg3)' : 'var(--fg)'}>{t.title}</span>
+            <span
+              class="ellipsis"
+              style:color={t.status === 'DONE' ? 'var(--fg3)' : 'var(--fg)'}
+              >{t.title}</span
+            >
           </div>
           <div class="blockers">
             {#each blockers as b}
               {@const bn = index.byId.get(b)}
               <span class="mono bchip">
-                <span class="tinydot" style:background={bn ? STATUS_VAR[bn.status] : 'var(--fg3)'}></span>{b}
+                <span
+                  class="tinydot"
+                  style:background={bn ? STATUS_VAR[bn.status] : 'var(--fg3)'}
+                ></span>{b}
               </span>
             {/each}
           </div>
@@ -83,12 +126,19 @@
           <div class="steps">
             <div class="dots">
               {#each stepsOf(app.nodes, t.id) as s (s.id)}
-                <span class="sdot" style:background={s.status === 'DONE' ? 'var(--ready)' : 'var(--border)'}></span>
+                <span
+                  class="sdot"
+                  style:background={s.status === 'DONE'
+                    ? 'var(--ready)'
+                    : 'var(--border)'}
+                ></span>
               {/each}
             </div>
             <span class="mono ratio">{ratio.label}</span>
           </div>
-          <span class="mono status" style:color={STATUS_VAR[t.status]}>{t.status}</span>
+          <span class="mono status" style:color={STATUS_VAR[t.status]}
+            >{t.status}</span
+          >
         </div>
 
         {#if app.expandedTask[t.id]}
@@ -96,8 +146,15 @@
             <div class="steprow">
               <span></span>
               <div class="stepname">
-                <span class="mono sglyph" style:color={STATUS_VAR[s.status]}>{stepGlyph(s.status)}</span>
-                <span class="ellipsis" style:color={s.status === 'DONE' ? 'var(--fg3)' : 'var(--fg2)'}>{s.title}</span>
+                <span class="mono sglyph" style:color={STATUS_VAR[s.status]}
+                  >{stepGlyph(s.status)}</span
+                >
+                <span
+                  class="ellipsis"
+                  style:color={s.status === 'DONE'
+                    ? 'var(--fg3)'
+                    : 'var(--fg2)'}>{s.title}</span
+                >
               </div>
               <span></span>
               <span class="mono scond ellipsis">{s.condition || ''}</span>
@@ -111,7 +168,10 @@
   {/each}
 
   {#if hidden > 0}
-    <button class="archived" onclick={() => (app.showArchived = !app.showArchived)}>
+    <button
+      class="archived"
+      onclick={() => (app.showArchived = !app.showArchived)}
+    >
       <span class="caret">{app.showArchived ? '▾' : '▸'}</span>
       {hidden} completed work {hidden === 1 ? 'package' : 'packages'}
       <span class="mono done">100%</span>
