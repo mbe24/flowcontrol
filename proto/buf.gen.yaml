@@ -1,0 +1,28 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: fctrl/internal/pb
+plugins:
+  # Go (fctrl): generated inside the fctrl module so it is importable without a
+  # separate go.mod. Import path: fctrl/internal/pb/fctrl/v1.
+  - remote: buf.build/protocolbuffers/go:v1.36.5
+    out: ../fctrl/internal/pb
+    opt: paths=source_relative
+  - remote: buf.build/grpc/go:v1.5.1
+    out: ../fctrl/internal/pb
+    opt: paths=source_relative
+
+  # Rust (fctrld)
+  - remote: buf.build/community/neoeinstein-prost:v0.4.0
+    out: ../fctrld/src/generated
+  - remote: buf.build/community/neoeinstein-tonic:v0.4.0
+    out: ../fctrld/src/generated
+
+  # TypeScript (fctrl-web): single shared output under the web app.
+  # fctrl-mcp can reference the same bindings once it exists.
+  - remote: buf.build/bufbuild/es:v2.2.3
+    out: ../fctrl-web/src/generated
+  - remote: buf.build/connectrpc/es:v1.6.1
+    out: ../fctrl-web/src/generated
