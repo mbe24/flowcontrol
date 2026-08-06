@@ -1,300 +1,408 @@
 package ui
 
 import (
-	"github.com/charmbracelet/bubbles/spinner"
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 
-	"flowcontrol/fctrl/internal/store"
+	"fctrl/internal/store"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-
 	case tea.WindowSizeMsg:
-		m.w, m.h = msg.Width, msg.Height
+		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 
-	case projectsMsg:
-		m.projects = msg.ps
-		if m.projectID == "" && len(m.projects) > 0 {
-			// stay on the picker; the user chooses
-			m.projCursor = 0
+	case loadedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
 		}
-		return m, nil
-
-	case dataMsg:
-		m.nodes, m.deps = msg.nodes, msg.deps
-		m.expandActive()
+		m.projects, m.nodes, m.deps, m.activity = msg.projects, msg.nodes, msg.deps, msg.activity
 		m.index()
-		return m, nil
-
-	case verifiedMsg:
-		m.verifying = false
-		for i := range m.nodes {
-			if m.nodes[i].ID == msg.id {
-				m.nodes[i].LastResult = msg.res
-				m.nodes[i].LastRun = "just now"
-			}
-		}
-		m.index()
-		switch msg.res {
-		case store.VerifyPass:
-			m.flash = "✓ condition passed · " + msg.id
-		case store.VerifyFail:
-			m.flash = "✕ condition failed · " + msg.id
-		default:
-			m.flash = "condition inconclusive · " + msg.id
+		if m.selectedID == "" && len(m.rows) > 0 {
+			m.selectedID = m.rows[0].node.ID
 		}
 		return m, nil
 
-	case errMsg:
-		m.err = msg.err
+	case refreshedMsg:
+		if msg.err == nil {
+			m.nodes, m.deps, m.activity = msg.nodes, msg.deps, msg.activity
+			m.index()
+		}
 		return m, nil
-
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spin, cmd = m.spin.Update(msg)
-		return m, cmd
 
 	case tea.KeyMsg:
-		return m.onKey(msg)
+		if m.overlay != OverlayNone {
+			return m.updateOverlay(msg)
+		}
+		return m.updateScreen(msg)
 	}
 	return m, nil
 }
 
-func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
+func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
 
-	// Overlays swallow keys first.
-	switch m.mode {
-	case modeFinder:
-		return m.finderKey(msg)
-	case modeStatus:
-		return m.statusKey(key)
-	case modeConfirm:
-		return m.confirmKey(key)
-	}
+	case "1":
+		m.screen = ScreenTree
+		return m, nil
+	case "2":
+		m.screen = ScreenLanes
+		return m, nil
+	case "3":
+		m.screen = ScreenChain
+		return m, nil
 
-	if m.screen == screenHelp {
-		if key == "?" || key == "esc" || key == "q" {
-			m.screen = screenBrowser
+	case "/":
+		m.overlay = OverlayFinder
+		m.input.SetValue("")
+		m.input.Placeholder = "task, step or command"
+		m.input.Focus()
+		m.finderIdx = 0
+		m.finderHits = nil
+		return m, nil
+
+	case "p":
+		m.overlay = OverlayProjects
+		m.projectIdx = 0
+		return m, nil
+
+	case "esc":
+		switch m.screen {
+		case ScreenActivity:
+			m.screen = ScreenDetail
+		case ScreenDetail:
+			m.screen = ScreenTree
+		}
+		return m, nil
+
+	case "enter":
+		if n, ok := m.current(); ok {
+			m.selectedID = m.ownerTask(n).ID
+			m.stepCursor = 0
+			m.screen = ScreenDetail
+		}
+		return m, nil
+
+	case "s":
+		if _, ok := m.current(); ok {
+			m.overlay = OverlayStatus
+			m.statusIdx = 0
+		}
+		return m, nil
+
+	case "u":
+		if m.lastStatus != nil {
+			id, prev := m.lastStatus.id, m.lastStatus.prev
+			m.lastStatus = nil
+			m.flash = "undid " + id
+			return m, m.setStatus(id, prev)
 		}
 		return m, nil
 	}
 
-	if m.screen == screenProjects {
-		return m.projectsKey(key)
+	switch m.screen {
+	case ScreenTree:
+		return m.updateTree(msg)
+	case ScreenLanes:
+		return m.updateLanes(msg)
+	case ScreenChain:
+		return m.updateChain(msg)
+	case ScreenDetail:
+		return m.updateDetail(msg)
+	case ScreenActivity:
+		return m.updateActivity(msg)
 	}
+	return m, nil
+}
 
-	switch key {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "?":
-		m.screen = screenHelp
-	case "p":
-		m.screen = screenProjects
+func (m Model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
 	case "j", "down":
 		m.cursor = min(m.cursor+1, len(m.rows)-1)
 	case "k", "up":
 		m.cursor = max(m.cursor-1, 0)
-	case "g":
-		m.cursor = 0
-	case "G":
-		m.cursor = max(len(m.rows)-1, 0)
-	case "tab":
-		m.focusDetail = !m.focusDetail
-	case " ", "space":
-		if n, ok := m.current(); ok && n.Type != store.TypeStep {
-			m.expanded[n.ID] = !m.expanded[n.ID]
+	case "h", "left":
+		if len(m.rows) > 0 {
+			r := m.rows[m.cursor]
+			if r.isWP {
+				m.collapsed[r.node.ID] = true
+			} else {
+				m.collapsed[r.node.ParentID] = true
+				for i, rr := range m.rows {
+					if rr.node.ID == r.node.ParentID {
+						m.cursor = i
+					}
+				}
+			}
 			m.buildRows()
 		}
-	case "enter":
-		if n, ok := m.current(); ok {
-			if n.Type == store.TypeWorkPackage {
-				m.expanded[n.ID] = true
-				m.buildRows()
-			} else {
-				m.focusDetail = true
-			}
+	case "l", "right":
+		if len(m.rows) > 0 && m.rows[m.cursor].isWP {
+			delete(m.collapsed, m.rows[m.cursor].node.ID)
+			m.buildRows()
 		}
-	case "esc":
-		m.focusDetail = false
-		m.flash = ""
-	case "a":
-		m.showArchived = !m.showArchived
+	case "D":
+		m.showDone = !m.showDone
 		m.buildRows()
-	case "/", "ctrl+p":
-		m.mode = modeFinder
-		m.finder.SetValue("")
-		m.results = nil
-		m.fCursor = 0
-		return m, m.finder.Focus()
-	case "s":
-		if n, ok := m.detailNode(); ok {
-			m.mode = modeStatus
-			m.statusCursor = statusIndex(n.Status)
+	}
+	if len(m.rows) > 0 {
+		m.selectedID = m.ownerTask(m.rows[m.cursor].node).ID
+	}
+	return m, nil
+}
+
+func (m Model) updateLanes(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	lanes := m.laneSet()
+	switch msg.String() {
+	case "h", "left":
+		m.lane = max(m.lane-1, 0)
+	case "l", "right", "tab":
+		m.lane = min(m.lane+1, len(lanes)-1)
+	case "j", "down":
+		n := len(m.laneTasks(lanes[m.lane]))
+		m.laneCursor[m.lane] = min(m.laneCursor[m.lane]+1, max(n-1, 0))
+	case "k", "up":
+		m.laneCursor[m.lane] = max(m.laneCursor[m.lane]-1, 0)
+	}
+	if n, ok := m.current(); ok {
+		m.selectedID = n.ID
+	}
+	return m, nil
+}
+
+func (m Model) updateChain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "j", "down":
+		m.chainCursor = min(m.chainCursor+1, len(m.chainRows)-1)
+	case "k", "up":
+		m.chainCursor = max(m.chainCursor-1, 0)
+	case "f":
+		if m.focusID != "" {
+			m.focusID = ""
+		} else if n, ok := m.current(); ok {
+			m.focusID = n.ID
 		}
-	case "d":
-		if n, ok := m.detailNode(); ok && n.Status != store.StatusDone {
-			m.pending = store.StatusDone
-			m.mode = modeConfirm
+		m.chainCursor = 0
+		m.buildChain()
+	case "w":
+		m.chainWP = (m.chainWP + 1) % max(len(m.activeWPs()), 1)
+		m.chainCursor = 0
+		m.focusID = ""
+		m.buildChain()
+	}
+	if n, ok := m.current(); ok {
+		m.selectedID = n.ID
+	}
+	return m, nil
+}
+
+func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	node, ok := m.byID[m.selectedID]
+	if !ok {
+		return m, nil
+	}
+	steps := m.stepsOf(node.ID)
+	switch msg.String() {
+	case "j", "down":
+		m.stepCursor = min(m.stepCursor+1, max(len(steps)-1, 0))
+	case "k", "up":
+		m.stepCursor = max(m.stepCursor-1, 0)
+	case "tab":
+		if len(steps) > 0 {
+			id := steps[m.stepCursor].ID
+			m.openSteps[id] = !m.openSteps[id]
 		}
 	case "v":
-		if n, ok := m.detailNode(); ok && n.Condition != "" {
-			m.verifying = true
-			m.flash = ""
-			return m, tea.Batch(verifyNode(m.st, n.ID), m.spin.Tick)
+		// Accepting over a reported failure is the one thing we confirm.
+		b := node.Verification.Badge()
+		if !b.Accepted && node.Verification.Agent == store.Fail {
+			m.confirmID = node.ID
+			m.overlay = OverlayConfirm
+			return m, nil
 		}
-	case "u":
-		if m.last != nil {
-			c := *m.last
-			m.last = nil
-			m.flash = "undid " + c.nodeID
-			return m, applyStatus(m.st, m.projectID, c.nodeID, c.prev)
+		next := store.Accepted
+		if b.Accepted {
+			next = store.NoVerdict
 		}
+		return m, m.setVerdict(node.ID, next)
+	case "a":
+		m.screen = ScreenActivity
+		m.activityScrl = 0
 	}
 	return m, nil
 }
 
-func (m Model) projectsKey(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "j", "down":
-		m.projCursor = min(m.projCursor+1, len(m.projects)-1)
-	case "k", "up":
-		m.projCursor = max(m.projCursor-1, 0)
-	case "esc":
-		if m.projectID != "" {
-			m.screen = screenBrowser
-		}
-	case "enter":
-		if m.projCursor < len(m.projects) {
-			m.projectID = m.projects[m.projCursor].ID
-			m.screen = screenBrowser
-			m.cursor = 0
-			return m, loadData(m.st, m.projectID)
-		}
-	}
-	return m, nil
-}
-
-func (m Model) finderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) updateActivity(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc":
-		m.mode = modeNone
-		m.finder.Blur()
-		return m, nil
-	case "down", "ctrl+n":
-		m.fCursor = min(m.fCursor+1, max(len(m.results)-1, 0))
-		return m, nil
-	case "up", "ctrl+p":
-		m.fCursor = max(m.fCursor-1, 0)
-		return m, nil
-	case "enter":
-		if m.fCursor < len(m.results) {
-			r := m.results[m.fCursor]
-			if r.kind != "cmd" {
-				m.jumpTo(r.node)
-			}
-		}
-		m.mode = modeNone
-		m.finder.Blur()
-		return m, nil
-	}
-
-	var cmd tea.Cmd
-	m.finder, cmd = m.finder.Update(msg)
-	m.search(m.finder.Value())
-	if m.fCursor >= len(m.results) {
-		m.fCursor = 0
-	}
-	return m, cmd
-}
-
-// jumpTo expands whatever it takes to put a node on screen, then parks the
-// cursor on it.
-func (m *Model) jumpTo(n store.Node) {
-	if n.Type == store.TypeStep {
-		if p, ok := m.byID[n.ParentID]; ok {
-			m.expanded[p.ID] = true
-			if wp, ok := m.byID[p.ParentID]; ok {
-				m.expanded[wp.ID] = true
-			}
-		}
-	} else if wp, ok := m.byID[n.ParentID]; ok {
-		m.expanded[wp.ID] = true
-	}
-	m.buildRows()
-	for i, r := range m.rows {
-		if r.node.ID == n.ID {
-			m.cursor = i
-			return
-		}
-	}
-}
-
-func (m Model) statusKey(key string) (tea.Model, tea.Cmd) {
-	pick := func(s store.Status) (tea.Model, tea.Cmd) {
-		n, ok := m.detailNode()
-		if !ok {
-			m.mode = modeNone
-			return m, nil
-		}
-		if s == store.StatusDone {
-			m.pending = store.StatusDone
-			m.mode = modeConfirm
-			return m, nil
-		}
-		m.mode = modeNone
-		m.last = &change{nodeID: n.ID, prev: n.Status}
-		m.flash = n.ID + " → " + string(s) + " · u to undo"
-		return m, applyStatus(m.st, m.projectID, n.ID, s)
-	}
-
-	switch key {
-	case "esc":
-		m.mode = modeNone
 	case "j", "down":
-		m.statusCursor = min(m.statusCursor+1, len(store.AllStatuses)-1)
+		m.activityScrl++
 	case "k", "up":
-		m.statusCursor = max(m.statusCursor-1, 0)
-	case "r":
-		return pick(store.StatusReady)
-	case "b":
-		return pick(store.StatusBlocked)
-	case "x":
-		return pick(store.StatusDeferred)
-	case "d":
-		return pick(store.StatusDone)
-	case "enter":
-		return pick(store.AllStatuses[m.statusCursor])
+		m.activityScrl = max(m.activityScrl-1, 0)
+	case "i":
+		m.overlay = OverlayComment
+		m.input.SetValue("")
+		m.input.Placeholder = "leave a note…"
+		m.input.Focus()
 	}
 	return m, nil
 }
 
-func (m Model) confirmKey(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "esc", "n":
-		m.mode = modeNone
-	case "enter", "y":
-		n, ok := m.detailNode()
-		m.mode = modeNone
-		if !ok {
+func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.overlay {
+	case OverlayConfirm:
+		switch msg.String() {
+		case "y":
+			id := m.confirmID
+			m.overlay, m.confirmID = OverlayNone, ""
+			m.flash = id + " · accepted over the agent's failure"
+			return m, m.setVerdict(id, store.Accepted)
+		case "esc", "n", "q":
+			m.overlay, m.confirmID = OverlayNone, ""
+		}
+		return m, nil
+
+	case OverlayStatus:
+		switch msg.String() {
+		case "esc":
+			m.overlay = OverlayNone
+		case "j", "down":
+			m.statusIdx = min(m.statusIdx+1, len(store.AllStatuses)-1)
+		case "k", "up":
+			m.statusIdx = max(m.statusIdx-1, 0)
+		case "enter":
+			m.overlay = OverlayNone
+			if n, ok := m.current(); ok {
+				target := m.ownerTask(n)
+				m.lastStatus = &struct {
+					id   string
+					prev store.Status
+				}{target.ID, target.Status}
+				return m, m.setStatus(target.ID, store.AllStatuses[m.statusIdx])
+			}
+		}
+		return m, nil
+
+	case OverlayProjects:
+		switch msg.String() {
+		case "esc":
+			m.overlay = OverlayNone
+		case "j", "down":
+			m.projectIdx = min(m.projectIdx+1, len(m.projects)-1)
+		case "k", "up":
+			m.projectIdx = max(m.projectIdx-1, 0)
+		case "enter":
+			m.overlay = OverlayNone
+			if m.projectIdx < len(m.projects) {
+				m.projectID = m.projects[m.projectIdx].ID
+				m.cursor, m.chainCursor, m.selectedID = 0, 0, ""
+				m.screen = ScreenTree
+				return m, m.load
+			}
+		}
+		return m, nil
+
+	case OverlayComment:
+		switch msg.String() {
+		case "esc":
+			m.overlay = OverlayNone
+			m.input.Blur()
+			return m, nil
+		case "enter":
+			text := strings.TrimSpace(m.input.Value())
+			m.overlay = OverlayNone
+			m.input.Blur()
+			if text != "" && m.selectedID != "" {
+				return m, m.addComment(m.selectedID, text)
+			}
 			return m, nil
 		}
-		m.last = &change{nodeID: n.ID, prev: n.Status}
-		m.flash = n.ID + " → DONE · u to undo · cascade is the core's job"
-		return m, applyStatus(m.st, m.projectID, n.ID, m.pending)
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+
+	case OverlayFinder:
+		switch msg.String() {
+		case "esc":
+			m.overlay = OverlayNone
+			m.input.Blur()
+			return m, nil
+		case "down", "ctrl+n":
+			m.finderIdx = min(m.finderIdx+1, max(len(m.finderHits)-1, 0))
+			return m, nil
+		case "up", "ctrl+p":
+			m.finderIdx = max(m.finderIdx-1, 0)
+			return m, nil
+		case "enter":
+			m.overlay = OverlayNone
+			m.input.Blur()
+			if m.finderIdx < len(m.finderHits) {
+				m.selectedID = m.ownerTask(m.finderHits[m.finderIdx]).ID
+				m.screen = ScreenDetail
+				m.stepCursor = 0
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		m.finderHits = m.search(m.input.Value())
+		m.finderIdx = 0
+		return m, cmd
 	}
 	return m, nil
 }
 
-func statusIndex(s store.Status) int {
-	for i, v := range store.AllStatuses {
-		if v == s {
-			return i
+// ownerTask maps a step to the task that owns it; anything else is itself.
+func (m *Model) ownerTask(n store.Node) store.Node {
+	if n.Type == store.Step {
+		if parent, ok := m.byID[n.ParentID]; ok {
+			return parent
 		}
 	}
-	return 0
+	return n
+}
+
+func (m *Model) search(q string) []store.Node {
+	q = strings.ToLower(strings.TrimSpace(q))
+	if q == "" {
+		return nil
+	}
+	var out []store.Node
+	for _, n := range m.nodes {
+		if n.Type == store.WorkPackage {
+			continue
+		}
+		if strings.Contains(strings.ToLower(n.Title), q) || strings.Contains(strings.ToLower(n.ID), q) {
+			out = append(out, n)
+		}
+		if len(out) >= 10 {
+			break
+		}
+	}
+	return out
+}
+
+func (m Model) setStatus(id string, s store.Status) tea.Cmd {
+	return func() tea.Msg {
+		_ = m.store.SetStatus(m.ctx, id, s)
+		return m.refresh()
+	}
+}
+
+func (m Model) setVerdict(id string, v store.HumanVerdict) tea.Cmd {
+	return func() tea.Msg {
+		_ = m.store.SetVerdict(m.ctx, id, v)
+		return m.refresh()
+	}
+}
+
+func (m Model) addComment(id, text string) tea.Cmd {
+	return func() tea.Msg {
+		_ = m.store.AddComment(m.ctx, id, text)
+		return m.refresh()
+	}
 }

@@ -3,195 +3,165 @@ package ui
 import (
 	"context"
 	"sort"
-	"strings"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/textinput"
 
-	"flowcontrol/fctrl/internal/store"
+	"fctrl/internal/store"
 )
 
-type screen int
+type Screen int
 
 const (
-	screenProjects screen = iota
-	screenBrowser
-	screenHelp
+	ScreenTree Screen = iota
+	ScreenLanes
+	ScreenChain
+	ScreenDetail
+	ScreenActivity
 )
 
-type mode int
+type Overlay int
 
 const (
-	modeNone mode = iota
-	modeFinder
-	modeStatus
-	modeConfirm
+	OverlayNone Overlay = iota
+	OverlayFinder
+	OverlayProjects
+	OverlayStatus
+	OverlayConfirm
+	OverlayComment
 )
 
-type rowKind int
-
+// Lane layout thresholds, derived from the drawn card widths:
+// four lanes = 4×22 + gutters + frame = 98; two = 2×30 + gutter + frame = 67.
 const (
-	rowWP rowKind = iota
-	rowTask
-	rowStep
-	rowArchived
+	FourLaneMin = 100
+	TwoLaneMin  = 68
+	OneLaneMin  = 44
 )
 
-type row struct {
-	kind    rowKind
-	node    store.Node
-	depth   int
-	hasKids bool
-	label   string
-}
-
-type change struct {
-	nodeID string
-	prev   store.Status
-}
-
-type result struct {
-	kind  string // "task" | "step" | "cmd"
-	id    string
-	title string
-	hint  string
-	node  store.Node
-}
-
-type projectsMsg struct{ ps []store.Project }
-type dataMsg struct {
-	nodes []store.Node
-	deps  []store.Dependency
-}
-type verifiedMsg struct {
-	id  string
-	res store.VerifyResult
-}
-type errMsg struct{ err error }
-
-// Model is the whole TUI. One model, five screens, two overlays.
-type Model struct {
-	st  store.Store
-	ctx context.Context
-
-	w, h int
-
-	screen screen
-	mode   mode
-
-	projects   []store.Project
-	projCursor int
-	projectID  string
-
+type loadedMsg struct {
 	nodes    []store.Node
 	deps     []store.Dependency
+	activity []store.ActivityEntry
+	projects []store.Project
+	err      error
+}
+
+type refreshedMsg loadedMsg
+
+// row is one visible line in the tree, flattened from the hierarchy.
+type row struct {
+	node     store.Node
+	depth    int
+	isWP     bool
+	expanded bool
+}
+
+type Model struct {
+	store store.Store
+	ctx   context.Context
+
+	width, height int
+
+	projects  []store.Project
+	projectID string
+	nodes     []store.Node
+	deps      []store.Dependency
+	activity  []store.ActivityEntry
+
 	byID     map[string]store.Node
 	blockers map[string][]string
 	blocks   map[string][]string
 
-	rows         []row
-	cursor       int
-	expanded     map[string]bool
-	showArchived bool
-	focusDetail  bool
+	screen  Screen
+	overlay Overlay
+	err     error
+	flash   string
 
-	finder  textinput.Model
-	results []result
-	fCursor int
+	// tree
+	rows      []row
+	cursor    int
+	collapsed map[string]bool
+	showDone  bool
 
-	statusCursor int
-	pending      store.Status
+	// lanes
+	lane       int
+	laneCursor [4]int
 
-	spin      spinner.Model
-	verifying bool
-	flash     string
+	// chain
+	chainRows   []chainRow
+	chainCursor int
+	chainWP     int
+	focusID     string
 
-	last *change
-	err  error
+	// detail
+	selectedID   string
+	stepCursor   int
+	openSteps    map[string]bool
+	descScroll   int
+	activityScrl int
+
+	// overlays
+	input       textinput.Model
+	finderHits  []store.Node
+	finderIdx   int
+	statusIdx   int
+	projectIdx  int
+	confirmID   string
+	lastStatus  *struct {
+		id   string
+		prev store.Status
+	}
 }
 
-func New(st store.Store) Model {
+func New(s store.Store) Model {
 	ti := textinput.New()
-	ti.Prompt = "/ "
-	ti.Placeholder = "task, step or command"
-	ti.CharLimit = 64
-
-	sp := spinner.New()
-	sp.Spinner = spinner.Dot
+	ti.Prompt = "› "
+	ti.CharLimit = 200
 
 	return Model{
-		st:       st,
-		ctx:      context.Background(),
-		screen:   screenProjects,
-		expanded: map[string]bool{},
-		byID:     map[string]store.Node{},
-		blockers: map[string][]string{},
-		blocks:   map[string][]string{},
-		finder:   ti,
-		spin:     sp,
-		w:        120,
-		h:        36,
+		store:     s,
+		ctx:       context.Background(),
+		projectID: "prj-travel",
+		screen:    ScreenTree,
+		collapsed: map[string]bool{},
+		openSteps: map[string]bool{},
+		input:     ti,
+		width:     120,
+		height:    40,
 	}
 }
 
-func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadProjects(m.st), m.spin.Tick)
-}
+func (m Model) Init() tea.Cmd { return m.load }
 
-func loadProjects(st store.Store) tea.Cmd {
-	return func() tea.Msg {
-		ps, err := st.Projects(context.Background())
-		if err != nil {
-			return errMsg{err}
-		}
-		return projectsMsg{ps}
+func (m Model) load() tea.Msg {
+	projects, err := m.store.Projects(m.ctx)
+	if err != nil {
+		return loadedMsg{err: err}
 	}
-}
-
-func loadData(st store.Store, pid string) tea.Cmd {
-	return func() tea.Msg {
-		ns, err := st.Nodes(context.Background(), pid)
-		if err != nil {
-			return errMsg{err}
-		}
-		ds, err := st.Dependencies(context.Background(), pid)
-		if err != nil {
-			return errMsg{err}
-		}
-		return dataMsg{ns, ds}
+	nodes, err := m.store.Nodes(m.ctx, m.projectID)
+	if err != nil {
+		return loadedMsg{err: err}
 	}
-}
-
-func applyStatus(st store.Store, pid, nodeID string, s store.Status) tea.Cmd {
-	return func() tea.Msg {
-		if err := st.SetStatus(context.Background(), nodeID, s); err != nil {
-			return errMsg{err}
-		}
-		ns, err := st.Nodes(context.Background(), pid)
-		if err != nil {
-			return errMsg{err}
-		}
-		ds, err := st.Dependencies(context.Background(), pid)
-		if err != nil {
-			return errMsg{err}
-		}
-		return dataMsg{ns, ds}
+	deps, err := m.store.Dependencies(m.ctx, m.projectID)
+	if err != nil {
+		return loadedMsg{err: err}
 	}
-}
-
-func verifyNode(st store.Store, id string) tea.Cmd {
-	return func() tea.Msg {
-		res, err := st.Verify(context.Background(), id)
-		if err != nil {
-			return errMsg{err}
-		}
-		return verifiedMsg{id: id, res: res}
+	act, err := m.store.Activity(m.ctx, m.projectID)
+	if err != nil {
+		return loadedMsg{err: err}
 	}
+	return loadedMsg{nodes: nodes, deps: deps, activity: act, projects: projects}
 }
 
+func (m Model) refresh() tea.Msg {
+	msg := m.load().(loadedMsg)
+	return refreshedMsg(msg)
+}
+
+// index rebuilds the id and dependency maps, then the flattened tree.
 func (m *Model) index() {
-	m.byID = map[string]store.Node{}
+	m.byID = make(map[string]store.Node, len(m.nodes))
 	for _, n := range m.nodes {
 		m.byID[n.ID] = n
 	}
@@ -202,181 +172,132 @@ func (m *Model) index() {
 		m.blocks[d.BlockerID] = append(m.blocks[d.BlockerID], d.BlockedID)
 	}
 	m.buildRows()
+	m.buildChain()
 }
 
-func (m *Model) buildRows() {
-	wps := []store.Node{}
+func (m *Model) workPackages() []store.Node {
+	var out []store.Node
 	for _, n := range m.nodes {
-		if n.Type == store.TypeWorkPackage {
-			wps = append(wps, n)
+		if n.Type == store.WorkPackage {
+			out = append(out, n)
 		}
 	}
-	sort.SliceStable(wps, func(i, j int) bool { return statePriority(wps[i].State) < statePriority(wps[j].State) })
-
-	children := func(parent string, t store.NodeType) []store.Node {
-		out := []store.Node{}
-		for _, n := range m.nodes {
-			if n.ParentID == parent && n.Type == t {
-				out = append(out, n)
-			}
+	prio := func(s store.WPState) int {
+		switch s {
+		case store.Active:
+			return 0
+		case store.Planned:
+			return 1
+		case store.WPDone:
+			return 2
 		}
-		return out
+		return 3
 	}
+	sort.SliceStable(out, func(i, j int) bool { return prio(out[i].State) < prio(out[j].State) })
+	return out
+}
 
-	rows := []row{}
-	hidden := 0
-	for _, wp := range wps {
-		if !m.showArchived && (wp.State == store.StateDone || wp.State == store.StateArchived) {
-			hidden++
+func (m *Model) childrenOf(parent string, t store.NodeType) []store.Node {
+	var out []store.Node
+	for _, n := range m.nodes {
+		if n.ParentID == parent && n.Type == t {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// buildRows flattens work packages and their tasks into the visible tree.
+// Done packages are folded away behind a disclosure row.
+func (m *Model) buildRows() {
+	m.rows = nil
+	for _, wp := range m.workPackages() {
+		if (wp.State == store.WPDone || wp.State == store.Archived) && !m.showDone {
 			continue
 		}
-		tasks := children(wp.ID, store.TypeTask)
-		rows = append(rows, row{kind: rowWP, node: wp, hasKids: len(tasks) > 0})
-		if !m.expanded[wp.ID] {
+		expanded := !m.collapsed[wp.ID]
+		m.rows = append(m.rows, row{node: wp, isWP: true, expanded: expanded})
+		if !expanded {
 			continue
 		}
-		for _, t := range tasks {
-			steps := children(t.ID, store.TypeStep)
-			rows = append(rows, row{kind: rowTask, node: t, depth: 1, hasKids: len(steps) > 0})
-			if !m.expanded[t.ID] {
-				continue
-			}
-			for _, s := range steps {
-				rows = append(rows, row{kind: rowStep, node: s, depth: 2})
-			}
+		for _, t := range m.childrenOf(wp.ID, store.Task) {
+			m.rows = append(m.rows, row{node: t, depth: 1})
 		}
 	}
-	if hidden > 0 {
-		rows = append(rows, row{kind: rowArchived, label: plural(hidden, "done package", "done packages") + " hidden"})
-	}
-	m.rows = rows
 	if m.cursor >= len(m.rows) {
 		m.cursor = max(0, len(m.rows)-1)
 	}
 }
 
-func statePriority(s store.WPState) int {
-	switch s {
-	case store.StateActive:
-		return 0
-	case store.StatePlanned:
-		return 1
-	case store.StateDone:
-		return 2
+func (m *Model) current() (store.Node, bool) {
+	switch m.screen {
+	case ScreenLanes:
+		cards := m.laneTasks(m.laneSet()[m.lane])
+		if len(cards) == 0 {
+			return store.Node{}, false
+		}
+		i := min(m.laneCursor[m.lane], len(cards)-1)
+		return cards[i], true
+	case ScreenChain:
+		if len(m.chainRows) == 0 {
+			return store.Node{}, false
+		}
+		i := min(m.chainCursor, len(m.chainRows)-1)
+		return m.chainRows[i].node, true
+	case ScreenDetail, ScreenActivity:
+		n, ok := m.byID[m.selectedID]
+		return n, ok
 	}
-	return 3
-}
-
-func (m Model) current() (store.Node, bool) {
-	if m.cursor < 0 || m.cursor >= len(m.rows) {
+	if len(m.rows) == 0 {
 		return store.Node{}, false
 	}
-	r := m.rows[m.cursor]
-	if r.kind == rowArchived {
-		return store.Node{}, false
-	}
-	return r.node, true
+	return m.rows[m.cursor].node, true
 }
 
-// detailNode is what the right-hand pane shows: the task under the cursor, or
-// the task owning the step under the cursor.
-func (m Model) detailNode() (store.Node, bool) {
-	n, ok := m.current()
-	if !ok {
-		return n, false
-	}
-	if n.Type == store.TypeStep {
-		if parent, ok := m.byID[n.ParentID]; ok {
-			return parent, true
+func (m *Model) stepsOf(taskID string) []store.Node { return m.childrenOf(taskID, store.Step) }
+
+func (m *Model) stepRatio(taskID string) (int, int) {
+	steps := m.stepsOf(taskID)
+	done := 0
+	for _, s := range steps {
+		if s.Status == store.Done {
+			done++
 		}
 	}
-	return n, true
+	return done, len(steps)
 }
 
-func (m Model) projectName() string {
-	for _, p := range m.projects {
-		if p.ID == m.projectID {
-			return p.Name
+// counts returns done/ready/blocked/deferred leaf counts under a work package.
+func (m *Model) counts(wpID string) (d, r, b, df, total int) {
+	for _, t := range m.childrenOf(wpID, store.Task) {
+		leaves := m.stepsOf(t.ID)
+		if len(leaves) == 0 {
+			leaves = []store.Node{t}
 		}
-	}
-	return "—"
-}
-
-func (m *Model) expandActive() {
-	for _, n := range m.nodes {
-		if n.Type == store.TypeWorkPackage && n.State == store.StateActive {
-			m.expanded[n.ID] = true
-		}
-	}
-}
-
-func (m *Model) search(q string) {
-	m.results = nil
-	q = strings.ToLower(strings.TrimSpace(q))
-	if q == "" {
-		return
-	}
-	for _, n := range m.nodes {
-		if n.Type == store.TypeWorkPackage {
-			continue
-		}
-		if !strings.Contains(strings.ToLower(n.Title), q) {
-			continue
-		}
-		kind := "task"
-		hint := ""
-		if n.Type == store.TypeStep {
-			kind = "step"
-			if p, ok := m.byID[n.ParentID]; ok {
-				hint = p.ID
+		for _, l := range leaves {
+			total++
+			switch l.Status {
+			case store.Done:
+				d++
+			case store.Ready:
+				r++
+			case store.Blocked:
+				b++
+			default:
+				df++
 			}
-		} else if wp, ok := m.byID[n.ParentID]; ok {
-			hint = shorten(wp.Title, 16)
-		}
-		m.results = append(m.results, result{kind: kind, id: n.ID, title: n.Title, hint: hint, node: n})
-		if len(m.results) >= 8 {
-			break
 		}
 	}
-	for _, s := range store.AllStatuses {
-		label := "status: set " + string(s)
-		if strings.Contains(strings.ToLower(label), q) {
-			m.results = append(m.results, result{kind: "cmd", title: label, hint: "cmd"})
+	return
+}
+
+func (m *Model) hueOf(wpID string) int {
+	for i, wp := range m.workPackages() {
+		if wp.ID == wpID {
+			return i
 		}
 	}
-}
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return itoa(n) + " " + one
-	}
-	return itoa(n) + " " + many
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	out := ""
-	for n > 0 {
-		out = string(rune('0'+n%10)) + out
-		n /= 10
-	}
-	if neg {
-		return "-" + out
-	}
-	return out
-}
-
-func shorten(s string, n int) string {
-	if len([]rune(s)) <= n {
-		return s
-	}
-	return string([]rune(s)[:n-1]) + "…"
+	return 0
 }
 
 func max(a, b int) int {

@@ -2,47 +2,199 @@ package store
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"sync"
-	"time"
 )
 
-// Memory is the fixture store. Everything lives in two slices, exactly the
-// shape the real tables have.
+// Memory is a fixture-backed Store. Same project as the Svelte prototype, so
+// the two front doors show the same data.
 type Memory struct {
 	mu       sync.RWMutex
 	projects []Project
 	nodes    []Node
 	deps     []Dependency
-	canned   map[string]VerifyResult
+	activity []ActivityEntry
+	seq      int
 }
 
-var _ Store = (*Memory)(nil)
+func ver(agent AgentResult, name, when string) Verification {
+	return Verification{Agent: agent, AgentName: name, AgentWhen: when, Human: NoVerdict}
+}
+
+func none() Verification { return Verification{Agent: NoReport, Human: NoVerdict} }
 
 func NewMemory() *Memory {
-	m := &Memory{
-		canned: map[string]VerifyResult{
-			"T-1042": VerifyPass,
-			"T-2012": VerifyFail,
-			"T-3007": VerifyPass,
-		},
+	wp := func(id, title string, state WPState) Node {
+		return Node{ID: id, ProjectID: "prj-travel", Type: WorkPackage, Title: title, Status: Ready, State: state}
 	}
-	m.seed()
+	task := func(id, parent, title string, st Status, cond string, desc []string, v Verification) Node {
+		return Node{ID: id, ProjectID: "prj-travel", ParentID: parent, Type: Task, Title: title,
+			Description: desc, Status: st, Condition: cond, Verification: v}
+	}
+	step := func(id, parent, title string, st Status, cond, note string) Node {
+		return Node{ID: id, ProjectID: "prj-travel", ParentID: parent, Type: Step, Title: title,
+			Status: st, Condition: cond, Note: note}
+	}
+
+	m := &Memory{
+		projects: []Project{
+			{"prj-travel", "Travel Webapp", "Booking flow, auth and payments."},
+			{"prj-beer", "Beer App", "Tasting notes and cellar tracking."},
+			{"prj-docs", "Developer Docs", "Public API reference."},
+		},
+		nodes: []Node{
+			wp("WP-AUTH", "Authentication Infrastructure", Active),
+			task("T-1041", "WP-AUTH", "Session store on Redis with sliding expiry", Done, "redis-cli ping",
+				[]string{
+					"Replaces the in-process session map so sessions survive a deploy.",
+					"Sliding expiry of 30 minutes with a hard cap of 12 hours. The cap matters more than the slide — without it a tab left open for a week keeps a session alive forever.",
+				}, ver(Pass, "claude-code", "3d ago")),
+			step("T-1041.1", "T-1041", "Provision Redis instance", Done, "terraform apply",
+				"Single node with AOF persistence. A cluster is overkill until sessions outgrow one box."),
+			step("T-1041.2", "T-1041", "Session serializer", Done, "pnpm test:session",
+				"MessagePack rather than JSON — roughly 40% smaller for our shape."),
+			step("T-1041.3", "T-1041", "Cut over behind flag", Done, "manual √", ""),
+
+			task("T-1042", "WP-AUTH", "OAuth2 device-code flow for the CLI", Ready, "pnpm test:auth --grep device",
+				[]string{
+					"The TUI and MCP server both authenticate headlessly. Device-code is the only flow that works without a browser redirect on the machine running fctrl.",
+					"The provider caps polling at one request every five seconds and returns slow_down when exceeded, so the client needs real backoff rather than a fixed interval.",
+					"Refresh tokens land in the OS keyring — Keychain, libsecret, or Credential Manager — never on disk in plaintext.",
+				}, ver(Pass, "claude-code", "2d ago")),
+			step("T-1042.1", "T-1042", "Register client credentials in provider", Done, "manual √",
+				"Done in the provider console; the client id lives in 1Password under \"fctrl oauth\"."),
+			step("T-1042.2", "T-1042", "Poll token endpoint with backoff", Done, "curl -sf /device/token",
+				"Exponential from 5s with a 30s ceiling, honouring the slow_down hint by adding 5s each time it appears."),
+			step("T-1042.3", "T-1042", "Persist refresh token to OS keyring", Ready, "fctrl auth whoami",
+				"Keychain on macOS, libsecret on Linux, Credential Manager on Windows. Headless Linux has no libsecret — fall back to a mode-0600 file and warn loudly."),
+			step("T-1042.4", "T-1042", "Handle expired_token + slow_down", Blocked, "pnpm test:auth --grep slowdown",
+				"Blocked on the error taxonomy being settled in T-1043."),
+			step("T-1042.5", "T-1042", "Docs: CLI login walkthrough", Blocked, "file exists: docs/cli-login.md", ""),
+
+			task("T-1043", "WP-AUTH", "Refresh-token rotation and reuse detection", Blocked, "pnpm test:auth --grep rotate",
+				[]string{
+					"Rotate on every refresh; a replayed token invalidates the whole family.",
+					"Reuse almost always means theft. Killing the family logs the legitimate user out too, which is the correct trade.",
+				}, none()),
+			step("T-1043.1", "T-1043", "Token family table", Blocked, "", "One row per family, not per token. Tokens are derived."),
+			step("T-1043.2", "T-1043", "Rotation on refresh", Blocked, "", ""),
+			step("T-1043.3", "T-1043", "Reuse alarm", Blocked, "", "Page on it. A reuse event is a live incident, not a metric."),
+			step("T-1043.4", "T-1043", "Backfill existing tokens", Blocked, "", ""),
+
+			task("T-1044", "WP-AUTH", "Rate-limit the token endpoint", Blocked, "k6 run load/token.js",
+				[]string{"Needs the metrics pipeline from Observability before limits can be tuned to anything but a guess."}, none()),
+			step("T-1044.1", "T-1044", "Choose limiter algorithm", Blocked, "", "Sliding window over token bucket — bursty CLI logins are legitimate."),
+			step("T-1044.2", "T-1044", "Wire to metrics", Blocked, "", ""),
+			step("T-1044.3", "T-1044", "Load test at 5k rps", Blocked, "", ""),
+
+			task("T-1045", "WP-AUTH", "Migrate legacy sessions", Deferred, "manual sign-off",
+				[]string{"Parked until the legacy cohort drops below 2% of DAU. Currently 6.4% and falling about half a point a month."},
+				ver(Stale, "claude-code", "3w ago")),
+			step("T-1045.1", "T-1045", "Cohort report", Done, "manual √", "Refreshed weekly into the Observability dashboard."),
+			step("T-1045.2", "T-1045", "Dual-read shim", Deferred, "", ""),
+			step("T-1045.3", "T-1045", "Backfill job", Deferred, "", ""),
+			step("T-1045.4", "T-1045", "Cutover", Deferred, "", ""),
+
+			task("T-1046", "WP-AUTH", "Audit-log every token issuance", Ready, "pnpm test:auth --grep audit",
+				[]string{"Compliance wants issuance, refresh and revocation events retained for a year."},
+				ver(Fail, "claude-code", "4h ago")),
+			step("T-1046.1", "T-1046", "Event schema", Ready, "", ""),
+			step("T-1046.2", "T-1046", "Write path", Blocked, "", ""),
+			step("T-1046.3", "T-1046", "Retention policy", Blocked, "", ""),
+
+			wp("WP-BOOK", "Booking Engine", Active),
+			task("T-2010", "WP-BOOK", "Availability search across provider adapters", Ready, "pnpm test:booking",
+				[]string{
+					"Fan-out to every enabled adapter, merge and de-duplicate by property id.",
+					"A slow adapter must not hold the whole response. Each gets a 600ms budget and anything late is dropped from this query.",
+				}, ver(Pass, "claude-code", "20m ago")),
+			step("T-2010.1", "T-2010", "Adapter interface", Done, "tsc --noEmit", ""),
+			step("T-2010.2", "T-2010", "Fan-out with timeout budget", Done, "pnpm test:booking --grep fanout", "allSettled with a per-adapter cancel."),
+			step("T-2010.3", "T-2010", "Result de-duplication", Done, "pnpm test:booking --grep dedupe", "Provider id first, then normalised name plus coordinates within 50m."),
+			step("T-2010.4", "T-2010", "Currency normalisation", Done, "manual √", ""),
+			step("T-2010.5", "T-2010", "Cache layer", Ready, "redis-cli ping", "Five minute TTL keyed on the normalised query."),
+			step("T-2010.6", "T-2010", "Adapter failure isolation", Blocked, "", ""),
+			step("T-2010.7", "T-2010", "p95 under 800ms", Blocked, "k6 run load/search.js", ""),
+
+			task("T-2011", "WP-BOOK", "Hold-and-confirm two-phase reservation", Blocked, "pnpm test:booking --grep hold",
+				[]string{"Holds expire after 10 minutes; confirm is idempotent per hold id."}, none()),
+			step("T-2011.1", "T-2011", "Hold table + TTL", Blocked, "", ""),
+			step("T-2011.2", "T-2011", "Confirm endpoint", Blocked, "", ""),
+			step("T-2011.3", "T-2011", "Expiry sweeper", Blocked, "", "Runs every 30s. A missed sweep is harmless; a double-release is not."),
+
+			task("T-2012", "WP-BOOK", "Idempotency keys on the confirm endpoint", Blocked, "file exists: docs/idempotency.md",
+				[]string{"Keys are scoped per authenticated principal, so this waits on the CLI auth flow."},
+				ver(Fail, "claude-code", "3h ago")),
+			step("T-2012.1", "T-2012", "Key storage + TTL", Blocked, "", ""),
+			step("T-2012.2", "T-2012", "Replay response cache", Blocked, "", ""),
+			step("T-2012.3", "T-2012", "Document the contract", Blocked, "", ""),
+
+			wp("WP-PAY", "Payments", Active),
+			task("T-3007", "WP-PAY", "Stripe webhook signature verification", Ready, "pnpm test:pay --grep webhook",
+				[]string{"Reject unsigned or replayed webhook deliveries."}, none()),
+			step("T-3007.1", "T-3007", "Verify signature header", Ready, "", ""),
+			step("T-3007.2", "T-3007", "Replay window of 5m", Blocked, "", ""),
+			task("T-3001", "WP-PAY", "Currency rounding rules", Done, "pnpm test:pay --grep round",
+				[]string{"Banker's rounding at the line level, not the total."}, ver(Pass, "claude-code", "1w ago")),
+			task("T-3011", "WP-PAY", "Refund reconciliation job", Blocked, "pnpm test:pay --grep refund",
+				[]string{"Cannot reconcile refunds until reservations have a stable lifecycle."}, none()),
+
+			wp("WP-OBS", "Observability", Planned),
+			task("T-4002", "WP-OBS", "Structured log schema for the Rust core", Ready, "cargo test --package fctrl-core log",
+				[]string{"One event shape for the engine, the web app and the TUI."}, none()),
+			task("T-4000", "WP-OBS", "OTel collector bootstrap", Done, "kubectl get pods -l otel", nil, ver(Pass, "claude-code", "2w ago")),
+
+			wp("WP-UI", "UI Redesign", Planned),
+			task("T-5001", "WP-UI", "Dark-mode token audit", Deferred, "manual", nil, none()),
+
+			wp("WP-LEGACY", "Legacy Import", WPDone),
+			task("T-9001", "WP-LEGACY", "One-off CSV import", Done, "manual", nil,
+				Verification{Agent: Pass, AgentName: "you", AgentWhen: "3w ago", Human: Accepted, HumanWhen: "3w ago"}),
+
+			{ID: "WP-BEER", ProjectID: "prj-beer", Type: WorkPackage, Title: "Cellar tracking", Status: Ready, State: Active},
+			{ID: "T-8001", ProjectID: "prj-beer", ParentID: "WP-BEER", Type: Task, Title: "Bottle inventory model",
+				Description: []string{"Track what is in the cellar and when it should be drunk."}, Status: Ready,
+				Condition: "pnpm test:cellar", Verification: none()},
+			{ID: "WP-DOCS", ProjectID: "prj-docs", Type: WorkPackage, Title: "API reference", Status: Ready, State: Active},
+			{ID: "T-7001", ProjectID: "prj-docs", ParentID: "WP-DOCS", Type: Task, Title: "Generate from OpenAPI",
+				Status: Blocked, Condition: "make docs", Verification: none()},
+		},
+		deps: []Dependency{
+			{"T-1042", "T-1043"},
+			{"T-1043", "T-1044"},
+			{"WP-OBS", "T-1044"},
+			{"T-2010", "T-2011"},
+			{"T-2011", "T-2012"},
+			{"T-1042", "T-2012"},
+			{"WP-BOOK", "T-3011"},
+			{"T-3007", "T-3011"},
+		},
+		activity: []ActivityEntry{
+			{"a1", "T-1042", ActVerify, "claude-code", "2d ago", "Reported condition passed"},
+			{"a2", "T-1042", ActStatus, "you", "2d ago", "BLOCKED → READY, the keyring work can start"},
+			{"a3", "T-1042", ActEdit, "claude-code", "3d ago", "Marked step \"Poll token endpoint with backoff\" done"},
+			{"a4", "T-1042", ActComment, "you", "4d ago", "Split the polling work out of T-1041 — it was doing too much."},
+			{"a5", "T-1046", ActVerify, "claude-code", "4h ago", "Reported condition failed: 2 assertions in audit.spec.ts"},
+			{"a6", "T-1046", ActComment, "claude-code", "4h ago", "The failures are in the retention assertions, not the write path."},
+			{"a7", "T-2010", ActVerify, "claude-code", "20m ago", "Reported condition passed"},
+			{"a8", "T-2012", ActVerify, "claude-code", "3h ago", "Reported condition failed: docs/idempotency.md not found"},
+			{"a9", "T-1041", ActStatus, "you", "3d ago", "READY → DONE"},
+		},
+		seq: 100,
+	}
 	return m
 }
 
 func (m *Memory) Projects(_ context.Context) ([]Project, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]Project, len(m.projects))
-	copy(out, m.projects)
-	return out, nil
+	return append([]Project(nil), m.projects...), nil
 }
 
 func (m *Memory) Nodes(_ context.Context, projectID string) ([]Node, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := []Node{}
+	out := make([]Node, 0, len(m.nodes))
 	for _, n := range m.nodes {
 		if n.ProjectID == projectID {
 			out = append(out, n)
@@ -54,164 +206,86 @@ func (m *Memory) Nodes(_ context.Context, projectID string) ([]Node, error) {
 func (m *Memory) Dependencies(_ context.Context, projectID string) ([]Dependency, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	inProject := map[string]bool{}
+	in := map[string]bool{}
 	for _, n := range m.nodes {
 		if n.ProjectID == projectID {
-			inProject[n.ID] = true
+			in[n.ID] = true
 		}
 	}
-	out := []Dependency{}
+	out := make([]Dependency, 0, len(m.deps))
 	for _, d := range m.deps {
-		if inProject[d.BlockerID] || inProject[d.BlockedID] {
+		if in[d.BlockerID] || in[d.BlockedID] {
 			out = append(out, d)
 		}
 	}
 	return out, nil
 }
 
-// SetStatus writes the one node. No cascade: the Rust core owns that, and
-// faking it here would teach the prototype the wrong lesson.
-func (m *Memory) SetStatus(_ context.Context, nodeID string, s Status) error {
+func (m *Memory) Activity(_ context.Context, projectID string) ([]ActivityEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	in := map[string]bool{}
+	for _, n := range m.nodes {
+		if n.ProjectID == projectID {
+			in[n.ID] = true
+		}
+	}
+	out := make([]ActivityEntry, 0, len(m.activity))
+	for _, a := range m.activity {
+		if in[a.NodeID] {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (m *Memory) SetStatus(_ context.Context, nodeID string, status Status) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i := range m.nodes {
 		if m.nodes[i].ID == nodeID {
-			m.nodes[i].Status = s
+			prev := m.nodes[i].Status
+			m.nodes[i].Status = status
+			m.push(nodeID, ActStatus, fmt.Sprintf("%s → %s", prev, status))
 			return nil
 		}
 	}
-	return errors.New("node not found: " + nodeID)
+	return fmt.Errorf("node not found: %s", nodeID)
 }
 
-// Verify fakes a condition run: a short pause, then a canned result.
-func (m *Memory) Verify(_ context.Context, nodeID string) (VerifyResult, error) {
-	time.Sleep(900 * time.Millisecond)
+func (m *Memory) SetVerdict(_ context.Context, nodeID string, verdict HumanVerdict) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	res, ok := m.canned[nodeID]
-	if !ok {
-		res = VerifyPass
-	}
 	for i := range m.nodes {
 		if m.nodes[i].ID == nodeID {
-			m.nodes[i].LastResult = res
-			m.nodes[i].LastRun = "just now"
-			break
-		}
-	}
-	return res, nil
-}
-
-// Dependents returns the nodes this one blocks — used by the confirm bar to
-// show what the core *would* re-evaluate.
-func (m *Memory) Dependents(nodeID string) []Node {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	byID := map[string]Node{}
-	for _, n := range m.nodes {
-		byID[n.ID] = n
-	}
-	out := []Node{}
-	for _, d := range m.deps {
-		if d.BlockerID == nodeID {
-			if n, ok := byID[d.BlockedID]; ok {
-				out = append(out, n)
+			m.nodes[i].Verification.Human = verdict
+			if verdict == NoVerdict {
+				m.nodes[i].Verification.HumanWhen = ""
+				m.push(nodeID, ActVerify, "Cleared the verification override")
+			} else {
+				m.nodes[i].Verification.HumanWhen = "just now"
+				if verdict == Accepted {
+					m.push(nodeID, ActVerify, "Accepted the condition as verified")
+				} else {
+					m.push(nodeID, ActVerify, "Rejected the condition")
+				}
 			}
+			return nil
 		}
 	}
-	return out
+	return fmt.Errorf("node not found: %s", nodeID)
 }
 
-func (m *Memory) seed() {
-	now := time.Now().Unix()
-	m.projects = []Project{
-		{ID: "prj-travel", Name: "Travel Webapp", Description: "Booking flow, auth and payments.", CreatedAt: now},
-		{ID: "prj-beer", Name: "Beer App", Description: "Tasting notes and cellar tracking.", CreatedAt: now},
-		{ID: "prj-docs", Name: "Developer Docs", Description: "Public API reference.", CreatedAt: now},
-	}
+func (m *Memory) AddComment(_ context.Context, nodeID, text string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.push(nodeID, ActComment, text)
+	return nil
+}
 
-	wp := func(id, name string, state WPState) Node {
-		return Node{ID: id, ProjectID: "prj-travel", Type: TypeWorkPackage, Title: name, Status: StatusReady, State: state, LastResult: VerifyNone}
-	}
-	task := func(id, parent, title string, st Status, cond, desc string, res VerifyResult, run string) Node {
-		return Node{ID: id, ProjectID: "prj-travel", ParentID: parent, Type: TypeTask, Title: title, Status: st, Condition: cond, Description: desc, LastResult: res, LastRun: run}
-	}
-	step := func(id, parent, title string, st Status, cond string) Node {
-		return Node{ID: id, ProjectID: "prj-travel", ParentID: parent, Type: TypeStep, Title: title, Status: st, Condition: cond, LastResult: VerifyNone}
-	}
-
-	m.nodes = []Node{
-		wp("WP-AUTH", "Authentication Infrastructure", StateActive),
-		task("T-1041", "WP-AUTH", "Session store on Redis with sliding expiry", StatusDone,
-			"redis-cli ping", "Replaces the in-process session map. Sliding expiry of 30m, hard cap 12h.", VerifyPass, "3d ago"),
-		step("T-1041.1", "T-1041", "Provision Redis instance", StatusDone, "terraform apply"),
-		step("T-1041.2", "T-1041", "Session serializer", StatusDone, "go test ./session"),
-		step("T-1041.3", "T-1041", "Cut over behind flag", StatusDone, "manual"),
-
-		task("T-1042", "WP-AUTH", "OAuth2 device-code flow for the CLI", StatusReady,
-			"pnpm test:auth --grep device",
-			"The TUI and MCP server both authenticate headlessly. Device-code is the only flow that works without a browser redirect on the machine running fctrl.",
-			VerifyStale, "2d ago"),
-		step("T-1042.1", "T-1042", "Register client credentials in provider", StatusDone, "manual"),
-		step("T-1042.2", "T-1042", "Poll token endpoint with backoff", StatusDone, "curl -sf /device/token"),
-		step("T-1042.3", "T-1042", "Persist refresh token to OS keyring", StatusReady, "fctrl auth whoami"),
-		step("T-1042.4", "T-1042", "Handle expired_token + slow_down", StatusBlocked, "pnpm test:auth --grep slowdown"),
-		step("T-1042.5", "T-1042", "Docs: CLI login walkthrough", StatusBlocked, "file exists: docs/cli-login.md"),
-
-		task("T-1043", "WP-AUTH", "Refresh-token rotation + reuse detection", StatusBlocked,
-			"pnpm test:auth --grep rotate", "Rotate on every refresh; a replayed token invalidates the whole family.", VerifyNone, ""),
-		step("T-1043.1", "T-1043", "Token family table", StatusBlocked, ""),
-		step("T-1043.2", "T-1043", "Rotation on refresh", StatusBlocked, ""),
-		step("T-1043.3", "T-1043", "Reuse alarm", StatusBlocked, ""),
-
-		task("T-1044", "WP-AUTH", "Rate-limit the token endpoint", StatusBlocked,
-			"k6 run load/token.js", "Needs the metrics pipeline from Observability before limits can be tuned.", VerifyNone, ""),
-		task("T-1045", "WP-AUTH", "Migrate legacy sessions", StatusDeferred,
-			"manual sign-off", "Parked until the legacy cohort drops below 2% of DAU.", VerifyNone, ""),
-
-		wp("WP-BOOK", "Booking Engine", StateActive),
-		task("T-2010", "WP-BOOK", "Availability search across provider adapters", StatusReady,
-			"pnpm test:booking", "Fan-out to every enabled adapter, merge and de-duplicate by property id.", VerifyPass, "20m ago"),
-		step("T-2010.1", "T-2010", "Adapter interface", StatusDone, "tsc --noEmit"),
-		step("T-2010.2", "T-2010", "Fan-out with timeout budget", StatusDone, "pnpm test:booking --grep fanout"),
-		step("T-2010.3", "T-2010", "Result de-duplication", StatusDone, "pnpm test:booking --grep dedupe"),
-		step("T-2010.4", "T-2010", "Cache layer", StatusReady, "redis-cli ping"),
-		step("T-2010.5", "T-2010", "p95 under 800ms", StatusBlocked, "k6 run load/search.js"),
-
-		task("T-2011", "WP-BOOK", "Hold-and-confirm two-phase reservation", StatusBlocked,
-			"pnpm test:booking --grep hold", "Holds expire after 10 minutes; confirm is idempotent per hold id.", VerifyNone, ""),
-		task("T-2012", "WP-BOOK", "Idempotency keys on the confirm endpoint", StatusBlocked,
-			"file exists: docs/idempotency.md", "Keys are scoped per authenticated principal, so this waits on the CLI auth flow.", VerifyFail, "3h ago"),
-
-		wp("WP-PAY", "Payments", StateActive),
-		task("T-3007", "WP-PAY", "Stripe webhook signature verification", StatusReady,
-			"pnpm test:pay --grep webhook", "Reject unsigned or replayed webhook deliveries.", VerifyNone, ""),
-		task("T-3011", "WP-PAY", "Refund reconciliation job", StatusBlocked,
-			"pnpm test:pay --grep refund", "Cannot reconcile refunds until reservations have a stable lifecycle.", VerifyNone, ""),
-
-		wp("WP-OBS", "Observability", StatePlanned),
-		task("T-4002", "WP-OBS", "Structured log schema for the Rust core", StatusReady,
-			"cargo test --package fctrl-core log", "One event shape for the engine, the web app and the TUI.", VerifyNone, ""),
-
-		wp("WP-UI", "UI Redesign", StatePlanned),
-		task("T-5001", "WP-UI", "Dark-mode token audit", StatusDeferred, "manual", "", VerifyNone, ""),
-
-		wp("WP-LEGACY", "Legacy Import", StateDone),
-		task("T-9001", "WP-LEGACY", "One-off CSV import", StatusDone, "manual", "", VerifyPass, "3w ago"),
-
-		{ID: "WP-BEER", ProjectID: "prj-beer", Type: TypeWorkPackage, Title: "Cellar tracking", Status: StatusReady, State: StateActive},
-		{ID: "T-8001", ProjectID: "prj-beer", ParentID: "WP-BEER", Type: TypeTask, Title: "Bottle inventory model", Status: StatusReady, Condition: "go test ./cellar"},
-		{ID: "WP-DOCS", ProjectID: "prj-docs", Type: TypeWorkPackage, Title: "API reference", Status: StatusReady, State: StateActive},
-		{ID: "T-7001", ProjectID: "prj-docs", ParentID: "WP-DOCS", Type: TypeTask, Title: "Generate from OpenAPI", Status: StatusBlocked, Condition: "make docs"},
-	}
-
-	m.deps = []Dependency{
-		{BlockerID: "T-1042", BlockedID: "T-1043"},
-		{BlockerID: "T-1043", BlockedID: "T-1044"},
-		{BlockerID: "WP-OBS", BlockedID: "T-1044"},
-		{BlockerID: "T-2010", BlockedID: "T-2011"},
-		{BlockerID: "T-2011", BlockedID: "T-2012"},
-		{BlockerID: "T-1042", BlockedID: "T-2012"},
-		{BlockerID: "WP-BOOK", BlockedID: "T-3011"},
-	}
+// push prepends an activity entry. Caller holds the lock.
+func (m *Memory) push(nodeID string, kind ActivityKind, text string) {
+	m.seq++
+	e := ActivityEntry{ID: fmt.Sprintf("a%d", m.seq), NodeID: nodeID, Kind: kind, Author: "you", When: "just now", Text: text}
+	m.activity = append([]ActivityEntry{e}, m.activity...)
 }

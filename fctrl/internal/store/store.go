@@ -1,73 +1,92 @@
+// Package store defines the seam between the TUI and the engine.
+//
+// The in-memory implementation lives beside this file; a client that talks to
+// the Rust core over gRPC or a named pipe implements the same interface and
+// nothing under internal/ui changes.
 package store
 
 import "context"
 
-// NodeType mirrors the `type` column of the nodes table.
 type NodeType string
 
 const (
-	TypeWorkPackage NodeType = "WORK_PACKAGE"
-	TypeTask        NodeType = "TASK"
-	TypeStep        NodeType = "STEP"
+	WorkPackage NodeType = "WORK_PACKAGE"
+	Task        NodeType = "TASK"
+	Step        NodeType = "STEP"
 )
 
-// Status mirrors the `status` column.
 type Status string
 
 const (
-	StatusReady    Status = "READY"
-	StatusBlocked  Status = "BLOCKED"
-	StatusDeferred Status = "DEFERRED"
-	StatusDone     Status = "DONE"
+	Ready    Status = "READY"
+	Blocked  Status = "BLOCKED"
+	Deferred Status = "DEFERRED"
+	Done     Status = "DONE"
 )
 
-// AllStatuses is the order the status picker shows.
-var AllStatuses = []Status{StatusReady, StatusBlocked, StatusDeferred, StatusDone}
+var AllStatuses = []Status{Ready, Blocked, Deferred, Done}
 
-// WPState is the explicit work-package lifecycle field added on top of the
-// v1.0 data model, so the UI can decide what to expand and what to hide.
+// WPState is an addition to datamodel.md v1.0: work-package lifecycle, set
+// explicitly rather than derived from child status.
 type WPState string
 
 const (
-	StatePlanned  WPState = "PLANNED"
-	StateActive   WPState = "ACTIVE"
-	StateDone     WPState = "DONE"
-	StateArchived WPState = "ARCHIVED"
+	Planned  WPState = "PLANNED"
+	Active   WPState = "ACTIVE"
+	WPDone   WPState = "DONE"
+	Archived WPState = "ARCHIVED"
 )
 
-// VerifyResult is the cached outcome of running a node's condition.
-type VerifyResult string
+// AgentResult is what an agent reported about a node's condition. fctrl never
+// runs a condition itself.
+type AgentResult string
 
 const (
-	VerifyPass  VerifyResult = "pass"
-	VerifyFail  VerifyResult = "fail"
-	VerifyStale VerifyResult = "stale"
-	VerifyNone  VerifyResult = "none"
+	Pass      AgentResult = "pass"
+	Fail      AgentResult = "fail"
+	Stale     AgentResult = "stale"
+	NoReport  AgentResult = "none"
 )
+
+// HumanVerdict is the operator's explicit acceptance, independent of the agent.
+type HumanVerdict string
+
+const (
+	Accepted   HumanVerdict = "accepted"
+	Rejected   HumanVerdict = "rejected"
+	NoVerdict  HumanVerdict = "none"
+)
+
+type Verification struct {
+	Agent     AgentResult
+	AgentName string
+	AgentWhen string
+	Human     HumanVerdict
+	HumanWhen string
+}
 
 type Project struct {
 	ID          string
 	Name        string
 	Description string
-	CreatedAt   int64
 }
 
 type Node struct {
-	ID          string
-	ProjectID   string
-	ParentID    string
-	Type        NodeType
-	Title       string
-	Description string
+	ID        string
+	ProjectID string
+	ParentID  string
+	Type      NodeType
+	Title     string
+	// Paragraphs. Markdown later; plain text for now.
+	Description []string
 	Status      Status
 	Condition   string
-
-	// WORK_PACKAGE only.
+	// Step only: a few sentences, folded away until expanded.
+	Note string
+	// WorkPackage only.
 	State WPState
-
-	// Cached verification of Condition.
-	LastResult VerifyResult
-	LastRun    string
+	// Task and WorkPackage only. Steps show condition text but carry no flag.
+	Verification Verification
 }
 
 type Dependency struct {
@@ -75,19 +94,68 @@ type Dependency struct {
 	BlockedID string
 }
 
-// Store is the seam between the TUI and the engine. The in-memory
-// implementation in this package is the prototype's fixture; a named-pipe or
-// gRPC client implements the same five methods later and nothing in internal/ui
-// has to change.
+type ActivityKind string
+
+const (
+	ActStatus  ActivityKind = "status"
+	ActVerify  ActivityKind = "verify"
+	ActEdit    ActivityKind = "edit"
+	ActComment ActivityKind = "comment"
+)
+
+type ActivityEntry struct {
+	ID     string
+	NodeID string
+	Kind   ActivityKind
+	// Plain name. Agents get no special badge — authorship is just a byline.
+	Author string
+	When   string
+	Text   string
+}
+
 type Store interface {
 	Projects(ctx context.Context) ([]Project, error)
 	Nodes(ctx context.Context, projectID string) ([]Node, error)
 	Dependencies(ctx context.Context, projectID string) ([]Dependency, error)
+	Activity(ctx context.Context, projectID string) ([]ActivityEntry, error)
 
-	// SetStatus writes one node's status. In the real engine this triggers the
-	// downstream cascade; the prototype writes only the node you named.
-	SetStatus(ctx context.Context, nodeID string, s Status) error
+	// SetStatus writes one node. The engine owns the downstream cascade.
+	SetStatus(ctx context.Context, nodeID string, status Status) error
+	// SetVerdict records the operator's acceptance of a reported condition.
+	SetVerdict(ctx context.Context, nodeID string, verdict HumanVerdict) error
+	AddComment(ctx context.Context, nodeID, text string) error
+}
 
-	// Verify runs the node's condition and returns the outcome.
-	Verify(ctx context.Context, nodeID string) (VerifyResult, error)
+// Badge resolves an agent report and a human verdict into one display state.
+// The human verdict always wins; the agent's report stays visible beside it.
+type Badge struct {
+	Glyph    string
+	Label    string
+	Detail   string
+	Kind     Status // reused for colour: Ready=good, Blocked=bad, Deferred=unknown
+	Accepted bool
+}
+
+func (v Verification) Badge() Badge {
+	agent := ""
+	if v.AgentName != "" {
+		agent = v.AgentName + " · " + v.AgentWhen
+	}
+	switch {
+	case v.Human == Accepted:
+		label := "verified"
+		if v.Agent == Fail {
+			label = "accepted by you — agent reported failure"
+		}
+		return Badge{"√", label, agent, Ready, true}
+	case v.Human == Rejected:
+		return Badge{"×", "rejected by you", agent, Blocked, false}
+	case v.Agent == Pass:
+		return Badge{"√", "verified by agent", agent, Ready, false}
+	case v.Agent == Fail:
+		return Badge{"×", "agent reported a failure", agent, Blocked, false}
+	case v.Agent == Stale:
+		return Badge{"~", "report is out of date", agent, Deferred, false}
+	}
+	return Badge{"-", "not verified", "", Deferred, false}
 }
