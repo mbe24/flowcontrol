@@ -128,8 +128,8 @@ message Project {
   string description = 3;
   // Unix seconds when the project was created.
   int64 created_at = 4;
-  // True once the project is retired from active view.
-  bool archived = 5;
+  // Unix seconds when the project was archived; 0 = not archived.
+  int64 archived_at = 5;
 }
 
 // Verification is deliberately two independent halves. The agent's report and
