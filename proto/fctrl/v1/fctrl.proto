@@ -1,0 +1,386 @@
+syntax = "proto3";
+
+package fctrl.v1;
+
+// FlowControl core API.
+//
+// Two shapes of call, and the split matters:
+//
+//   * unary  — commands and one-shot reads
+//   * stream — Watch, the single push channel every client holds open
+//
+// Every mutation returns the events it produced, and those same events arrive
+// on Watch. A client can therefore apply its own change optimistically and let
+// the stream reconcile, or ignore the return value and wait for the stream.
+// Both work; neither needs polling.
+
+// ─── enums ───────────────────────────────────────────────────────────────────
+
+enum NodeKind {
+  NODE_KIND_UNSPECIFIED = 0;
+  NODE_KIND_WORK_PACKAGE = 1;
+  NODE_KIND_TASK = 2;
+  NODE_KIND_STEP = 3;
+}
+
+// What a human or agent SET on a node.
+enum DeclaredStatus {
+  DECLARED_STATUS_UNSPECIFIED = 0;
+  DECLARED_STATUS_OPEN = 1;
+  DECLARED_STATUS_DEFERRED = 2;
+  DECLARED_STATUS_DONE = 3;
+}
+
+// What the engine COMPUTED. Never sent on a write — the core owns this.
+enum EffectiveStatus {
+  EFFECTIVE_STATUS_UNSPECIFIED = 0;
+  EFFECTIVE_STATUS_READY = 1;
+  EFFECTIVE_STATUS_BLOCKED = 2;
+  EFFECTIVE_STATUS_DEFERRED = 3;
+  EFFECTIVE_STATUS_DONE = 4;
+}
+
+enum WorkPackageState {
+  WORK_PACKAGE_STATE_UNSPECIFIED = 0;
+  WORK_PACKAGE_STATE_PLANNED = 1;
+  WORK_PACKAGE_STATE_ACTIVE = 2;
+  WORK_PACKAGE_STATE_DONE = 3;
+  WORK_PACKAGE_STATE_ARCHIVED = 4;
+}
+
+enum AgentResult {
+  AGENT_RESULT_UNSPECIFIED = 0;  // never reported
+  AGENT_RESULT_PASS = 1;
+  AGENT_RESULT_FAIL = 2;
+}
+
+enum HumanVerdict {
+  HUMAN_VERDICT_UNSPECIFIED = 0;  // no override
+  HUMAN_VERDICT_ACCEPTED = 1;
+  HUMAN_VERDICT_REJECTED = 2;
+}
+
+enum EventKind {
+  EVENT_KIND_UNSPECIFIED = 0;
+  EVENT_KIND_NODE_CREATED = 1;
+  EVENT_KIND_NODE_UPDATED = 2;
+  EVENT_KIND_NODE_DELETED = 3;
+  EVENT_KIND_STATUS_SET = 4;
+  EVENT_KIND_DEP_ADDED = 5;
+  EVENT_KIND_DEP_REMOVED = 6;
+  EVENT_KIND_AGENT_REPORTED = 7;
+  EVENT_KIND_VERDICT_SET = 8;
+  EVENT_KIND_COMMENT = 9;
+}
+
+// ─── entities ────────────────────────────────────────────────────────────────
+
+message Project {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  int64 created_at = 4;      // unix seconds
+  bool archived = 5;
+}
+
+// Verification is deliberately two independent halves. The agent's report and
+// the operator's verdict are both facts, and the interesting case — an operator
+// accepting over a reported failure — needs both to survive.
+message Verification {
+  AgentResult agent_result = 1;
+  string agent_name = 2;
+  int64 agent_at = 3;
+  string agent_detail = 4;   // exit code, failing assertions, log tail
+
+  HumanVerdict human_verdict = 5;
+  int64 human_at = 6;
+
+  // True when the node changed after the agent's report — the clients show the
+  // report as out of date rather than trusting it.
+  bool stale = 7;
+}
+
+message Node {
+  string id = 1;
+  string project_id = 2;
+  string parent_id = 3;      // empty for a work package
+  NodeKind kind = 4;
+
+  string title = 5;
+  string description = 6;    // markdown
+  string condition = 7;      // the core NEVER executes this
+
+  DeclaredStatus declared_status = 8;
+  // Computed by the engine. Read-only for clients.
+  EffectiveStatus status = 9;
+
+  WorkPackageState wp_state = 10;  // work packages only
+  int32 position = 11;
+
+  Verification verification = 12;
+
+  int64 created_at = 13;
+  int64 updated_at = 14;
+}
+
+message Dependency {
+  string blocker_id = 1;
+  string blocked_id = 2;
+}
+
+message Event {
+  int64 seq = 1;             // monotonic per database; the resume cursor
+  string project_id = 2;
+  string node_id = 3;
+  EventKind kind = 4;
+  string author = 5;         // plain name; agents get no special treatment
+  string summary = 6;        // the activity-feed line
+  string payload_json = 7;   // before/after, for undo
+  int64 created_at = 8;
+}
+
+// Progress counts for a work package. Computed server-side so the two clients
+// cannot disagree about what "44% done" means.
+message Progress {
+  string work_package_id = 1;
+  int32 total = 2;
+  int32 done = 3;
+  int32 ready = 4;
+  int32 blocked = 5;
+  int32 deferred = 6;
+}
+
+// ─── reads ───────────────────────────────────────────────────────────────────
+
+message ListProjectsRequest {
+  bool include_archived = 1;
+}
+
+message ListProjectsResponse {
+  repeated Project projects = 1;
+}
+
+// One round trip for everything a client needs to paint. Both front doors open
+// with this, then hold Watch open from `seq`.
+message GetSnapshotRequest {
+  string project_id = 1;
+}
+
+message GetSnapshotResponse {
+  Project project = 1;
+  repeated Node nodes = 2;
+  repeated Dependency dependencies = 3;
+  repeated Progress progress = 4;
+  // Recent activity only — full history is paged through ListEvents.
+  repeated Event recent_events = 5;
+  // The cursor to resume Watch from. Everything above is consistent as of here.
+  int64 seq = 6;
+}
+
+message ListEventsRequest {
+  string project_id = 1;
+  string node_id = 2;        // optional filter
+  int64 before_seq = 3;      // paging backwards; 0 for most recent
+  int32 limit = 4;
+}
+
+message ListEventsResponse {
+  repeated Event events = 1;
+  bool has_more = 2;
+}
+
+message SearchRequest {
+  string project_id = 1;
+  string query = 2;
+  int32 limit = 3;
+}
+
+message SearchResponse {
+  repeated Node nodes = 1;
+}
+
+// ─── the push channel ────────────────────────────────────────────────────────
+
+message WatchRequest {
+  string project_id = 1;
+  // Last seq the client applied. 0 means "from now". If the gap is wider than
+  // the server's retention, it answers with resync_required instead of events.
+  int64 from_seq = 2;
+}
+
+// A cascade is one logical change producing many node changes, so the unit on
+// the wire is a batch, not a single node. A client applies the whole batch or
+// none of it.
+message WatchResponse {
+  repeated Event events = 1;
+  // Every node whose EFFECTIVE status changed as a result — this is the
+  // cascade, computed once by the engine rather than by each client.
+  repeated Node changed_nodes = 2;
+  repeated Progress changed_progress = 3;
+  int64 seq = 4;
+
+  // The client's from_seq is too old. Call GetSnapshot again and restart.
+  bool resync_required = 5;
+  // Sent every 30s with no other content, so a client can tell a quiet server
+  // from a dead one.
+  bool heartbeat = 6;
+}
+
+// ─── writes ──────────────────────────────────────────────────────────────────
+
+// Every mutation carries the author and an idempotency key. Agents retry; the
+// key stops a retried SetStatus from writing two events.
+message WriteMeta {
+  string author = 1;
+  string idempotency_key = 2;
+}
+
+message CreateNodeRequest {
+  WriteMeta meta = 1;
+  string project_id = 2;
+  string parent_id = 3;
+  NodeKind kind = 4;
+  string title = 5;
+  string description = 6;
+  string condition = 7;
+  int32 position = 8;
+}
+
+message UpdateNodeRequest {
+  WriteMeta meta = 1;
+  string node_id = 2;
+  // Only the fields named here are written.
+  repeated string update_mask = 3;  // "title" | "description" | "condition" | "position" | "wp_state"
+  string title = 4;
+  string description = 5;
+  string condition = 6;
+  int32 position = 7;
+  WorkPackageState wp_state = 8;
+}
+
+message DeleteNodeRequest {
+  WriteMeta meta = 1;
+  string node_id = 2;
+  // Reject the delete if the node still has dependents, rather than silently
+  // orphaning edges.
+  bool fail_if_referenced = 3;
+}
+
+message SetStatusRequest {
+  WriteMeta meta = 1;
+  string node_id = 2;
+  // OPEN, DEFERRED or DONE. READY and BLOCKED are not settable — they are the
+  // engine's answer, not the client's request.
+  DeclaredStatus declared_status = 3;
+}
+
+// Called by agents. The core records the report; it does not run the condition.
+message ReportConditionRequest {
+  WriteMeta meta = 1;
+  string node_id = 2;
+  AgentResult result = 3;
+  string detail = 4;
+}
+
+// Called by humans. Independent of what the agent reported.
+message SetVerdictRequest {
+  WriteMeta meta = 1;
+  string node_id = 2;
+  HumanVerdict verdict = 3;  // UNSPECIFIED clears the override
+}
+
+message AddCommentRequest {
+  WriteMeta meta = 1;
+  string node_id = 2;
+  string text = 3;
+}
+
+message AddDependencyRequest {
+  WriteMeta meta = 1;
+  string blocker_id = 2;
+  string blocked_id = 3;
+}
+
+message RemoveDependencyRequest {
+  WriteMeta meta = 1;
+  string blocker_id = 2;
+  string blocked_id = 3;
+}
+
+message UndoRequest {
+  WriteMeta meta = 1;
+  string project_id = 2;
+  int64 seq = 3;             // the event to reverse; 0 for the most recent
+}
+
+// Every mutation answers the same shape: what changed, and the new cursor.
+// A client that trusts the stream can ignore the body and keep the seq.
+message Mutation {
+  repeated Event events = 1;
+  repeated Node changed_nodes = 2;
+  repeated Progress changed_progress = 3;
+  int64 seq = 4;
+}
+
+message CreateNodeResponse {
+  Mutation mutation = 1;
+}
+
+message UpdateNodeResponse {
+  Mutation mutation = 1;
+}
+
+message DeleteNodeResponse {
+  Mutation mutation = 1;
+}
+
+message SetStatusResponse {
+  Mutation mutation = 1;
+}
+
+message ReportConditionResponse {
+  Mutation mutation = 1;
+}
+
+message SetVerdictResponse {
+  Mutation mutation = 1;
+}
+
+message AddCommentResponse {
+  Mutation mutation = 1;
+}
+
+message AddDependencyResponse {
+  Mutation mutation = 1;
+}
+
+message RemoveDependencyResponse {
+  Mutation mutation = 1;
+}
+
+message UndoResponse {
+  Mutation mutation = 1;
+}
+
+// ─── service ─────────────────────────────────────────────────────────────────
+
+service FlowService {
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+  rpc GetSnapshot(GetSnapshotRequest) returns (GetSnapshotResponse);
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+  rpc Search(SearchRequest) returns (SearchResponse);
+
+  // The one long-lived call. Every client holds exactly one.
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+
+  rpc CreateNode(CreateNodeRequest) returns (CreateNodeResponse);
+  rpc UpdateNode(UpdateNodeRequest) returns (UpdateNodeResponse);
+  rpc DeleteNode(DeleteNodeRequest) returns (DeleteNodeResponse);
+  rpc SetStatus(SetStatusRequest) returns (SetStatusResponse);
+  rpc ReportCondition(ReportConditionRequest) returns (ReportConditionResponse);
+  rpc SetVerdict(SetVerdictRequest) returns (SetVerdictResponse);
+  rpc AddComment(AddCommentRequest) returns (AddCommentResponse);
+  rpc AddDependency(AddDependencyRequest) returns (AddDependencyResponse);
+  rpc RemoveDependency(RemoveDependencyRequest) returns (RemoveDependencyResponse);
+  rpc Undo(UndoRequest) returns (UndoResponse);
+}
