@@ -13,6 +13,11 @@ pub struct FlowServiceServer {
     store: DynStore,
 }
 
+/// Convert a boxed store error into a tonic Status.
+fn into_status(e: Box<dyn std::error::Error + Send + Sync>) -> tonic::Status {
+    tonic::Status::internal(e.to_string())
+}
+
 impl FlowServiceServer {
     pub fn new(store: DynStore) -> Self {
         Self { store }
@@ -86,30 +91,38 @@ impl FlowService for FlowServiceServer {
 
     async fn create_node(
         &self,
-        _request: tonic::Request<pb::CreateNodeRequest>,
+        request: tonic::Request<pb::CreateNodeRequest>,
     ) -> Result<tonic::Response<pb::CreateNodeResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented("create_node not implemented yet"))
+        let req = request.into_inner();
+        let m = self.store.create_node(req).await.map_err(into_status)?;
+        Ok(tonic::Response::new(pb::CreateNodeResponse { mutation: Some(m) }))
     }
 
     async fn update_node(
         &self,
-        _request: tonic::Request<pb::UpdateNodeRequest>,
+        request: tonic::Request<pb::UpdateNodeRequest>,
     ) -> Result<tonic::Response<pb::UpdateNodeResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented("update_node not implemented yet"))
+        let req = request.into_inner();
+        let m = self.store.update_node(req).await.map_err(into_status)?;
+        Ok(tonic::Response::new(pb::UpdateNodeResponse { mutation: Some(m) }))
     }
 
     async fn delete_node(
         &self,
-        _request: tonic::Request<pb::DeleteNodeRequest>,
+        request: tonic::Request<pb::DeleteNodeRequest>,
     ) -> Result<tonic::Response<pb::DeleteNodeResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented("delete_node not implemented yet"))
+        let req = request.into_inner();
+        let m = self.store.delete_node(req).await.map_err(into_status)?;
+        Ok(tonic::Response::new(pb::DeleteNodeResponse { mutation: Some(m) }))
     }
 
     async fn set_status(
         &self,
-        _request: tonic::Request<pb::SetStatusRequest>,
+        request: tonic::Request<pb::SetStatusRequest>,
     ) -> Result<tonic::Response<pb::SetStatusResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented("set_status not implemented yet"))
+        let req = request.into_inner();
+        let m = self.store.set_status(req).await.map_err(into_status)?;
+        Ok(tonic::Response::new(pb::SetStatusResponse { mutation: Some(m) }))
     }
 
     async fn report_condition(
@@ -135,16 +148,20 @@ impl FlowService for FlowServiceServer {
 
     async fn add_dependency(
         &self,
-        _request: tonic::Request<pb::AddDependencyRequest>,
+        request: tonic::Request<pb::AddDependencyRequest>,
     ) -> Result<tonic::Response<pb::AddDependencyResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented("add_dependency not implemented yet"))
+        let req = request.into_inner();
+        let m = self.store.add_dependency(req).await.map_err(into_status)?;
+        Ok(tonic::Response::new(pb::AddDependencyResponse { mutation: Some(m) }))
     }
 
     async fn remove_dependency(
         &self,
-        _request: tonic::Request<pb::RemoveDependencyRequest>,
+        request: tonic::Request<pb::RemoveDependencyRequest>,
     ) -> Result<tonic::Response<pb::RemoveDependencyResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented("remove_dependency not implemented yet"))
+        let req = request.into_inner();
+        let m = self.store.remove_dependency(req).await.map_err(into_status)?;
+        Ok(tonic::Response::new(pb::RemoveDependencyResponse { mutation: Some(m) }))
     }
 
     async fn undo(
