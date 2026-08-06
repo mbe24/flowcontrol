@@ -226,6 +226,13 @@ export declare type Node = Message<"flow.v1.Node"> & {
    * @generated from field: int64 updated_at = 14;
    */
   updatedAt: bigint;
+
+  /**
+   * Free-text reference to an external system (e.g. JIRA-123).
+   *
+   * @generated from field: string reference = 15;
+   */
+  reference: string;
 };
 
 /**
@@ -797,6 +804,13 @@ export declare type CreateNodeRequest = Message<"flow.v1.CreateNodeRequest"> & {
    * @generated from field: int32 position = 8;
    */
   position: number;
+
+  /**
+   * External reference (plain text).
+   *
+   * @generated from field: string reference = 9;
+   */
+  reference: string;
 };
 
 /**
@@ -827,7 +841,7 @@ export declare type UpdateNodeRequest = Message<"flow.v1.UpdateNodeRequest"> & {
 
   /**
    * Only the fields named here are written. Allowed: title, description,
-   * condition, position, wp_state.
+   * condition, position, wp_state, reference.
    *
    * @generated from field: repeated string update_mask = 3;
    */
@@ -867,6 +881,13 @@ export declare type UpdateNodeRequest = Message<"flow.v1.UpdateNodeRequest"> & {
    * @generated from field: flow.v1.WorkPackageState wp_state = 8;
    */
   wpState: WorkPackageState;
+
+  /**
+   * New external reference, when masked.
+   *
+   * @generated from field: string reference = 9;
+   */
+  reference: string;
 };
 
 /**

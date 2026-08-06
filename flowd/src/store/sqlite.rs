@@ -80,7 +80,7 @@ impl Store for SqliteStore {
         // Nodes with effective status from the node_state view.
         let rows = sqlx::query(
             "SELECT n.id, n.project_id, COALESCE(n.parent_id,'') AS parent_id,
-                    n.kind, n.title, n.description, n.condition,
+                    n.kind, n.title, n.description, n.condition, COALESCE(n.reference,'') AS reference,
                     n.declared_status, n.wp_state, n.position, n.created_at, n.updated_at,
                     n.status AS effective_status
              FROM node_state n
@@ -116,6 +116,7 @@ impl Store for SqliteStore {
                 title: r.get("title"),
                 description: r.get("description"),
                 condition: r.get("condition"),
+                reference: r.get("reference"),
                 declared_status: declared as i32,
                 status: effective_status(r.get::<String, _>("effective_status").as_str()),
                 wp_state: wp_state as i32,
@@ -218,7 +219,7 @@ impl Store for SqliteStore {
     async fn search(&self, project_id: &str, query: &str, limit: i32) -> Result<Vec<pb::Node>, Box<dyn std::error::Error + Send + Sync>> {
         let rows = sqlx::query(
             "SELECT n.id, n.project_id, COALESCE(n.parent_id,'') AS parent_id,
-                    n.kind, n.title, n.description, n.condition,
+                    n.kind, n.title, n.description, n.condition, COALESCE(n.reference,'') AS reference,
                     n.declared_status, n.wp_state, n.position, n.created_at, n.updated_at
              FROM nodes n
              JOIN nodes_fts f ON f.rowid = n.rowid
@@ -250,6 +251,7 @@ impl Store for SqliteStore {
                 title: r.get("title"),
                 description: r.get("description"),
                 condition: r.get("condition"),
+                reference: r.get("reference"),
                 declared_status: declared as i32,
                 status: pb::EffectiveStatus::Unspecified as i32,
                 wp_state: 0,

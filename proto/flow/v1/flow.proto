@@ -183,6 +183,8 @@ message Node {
   int64 created_at = 13;
   // Unix seconds of the last change (excludes verification churn).
   int64 updated_at = 14;
+  // Free-text reference to an external system (e.g. JIRA-123).
+  string reference = 15;
 }
 
 // A directed edge in the dependency DAG: blocker must be done before blocked.
@@ -360,6 +362,8 @@ message CreateNodeRequest {
   string condition = 7;
   // Sibling ordering.
   int32 position = 8;
+  // External reference (plain text).
+  string reference = 9;
 }
 
 // Edits editable fields of an existing node.
@@ -369,7 +373,7 @@ message UpdateNodeRequest {
   // The node to update.
   string node_id = 2;
   // Only the fields named here are written. Allowed: title, description,
-  // condition, position, wp_state.
+  // condition, position, wp_state, reference.
   repeated string update_mask = 3;
   // New title, when masked.
   string title = 4;
@@ -381,6 +385,8 @@ message UpdateNodeRequest {
   int32 position = 7;
   // New work-package state, when masked (work packages only).
   WorkPackageState wp_state = 8;
+  // New external reference, when masked.
+  string reference = 9;
 }
 
 // Deletes a node and its subtree.

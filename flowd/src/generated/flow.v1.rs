@@ -97,6 +97,9 @@ pub struct Node {
     /// Unix seconds of the last change (excludes verification churn).
     #[prost(int64, tag="14")]
     pub updated_at: i64,
+    /// Free-text reference to an external system (e.g. JIRA-123).
+    #[prost(string, tag="15")]
+    pub reference: ::prost::alloc::string::String,
 }
 /// A directed edge in the dependency DAG: blocker must be done before blocked.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -342,6 +345,9 @@ pub struct CreateNodeRequest {
     /// Sibling ordering.
     #[prost(int32, tag="8")]
     pub position: i32,
+    /// External reference (plain text).
+    #[prost(string, tag="9")]
+    pub reference: ::prost::alloc::string::String,
 }
 /// Edits editable fields of an existing node.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -354,7 +360,7 @@ pub struct UpdateNodeRequest {
     #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
     /// Only the fields named here are written. Allowed: title, description,
-    /// condition, position, wp_state.
+    /// condition, position, wp_state, reference.
     #[prost(string, repeated, tag="3")]
     pub update_mask: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// New title, when masked.
@@ -372,6 +378,9 @@ pub struct UpdateNodeRequest {
     /// New work-package state, when masked (work packages only).
     #[prost(enumeration="WorkPackageState", tag="8")]
     pub wp_state: i32,
+    /// New external reference, when masked.
+    #[prost(string, tag="9")]
+    pub reference: ::prost::alloc::string::String,
 }
 /// Deletes a node and its subtree.
 #[allow(clippy::derive_partial_eq_without_eq)]

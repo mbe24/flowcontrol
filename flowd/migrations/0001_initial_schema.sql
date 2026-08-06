@@ -54,6 +54,8 @@ CREATE TABLE nodes (
     -- Free text the agent is expected to satisfy and verify. The core NEVER
     -- executes this.
     condition   TEXT NOT NULL DEFAULT '',
+    -- External reference (plain text, e.g. JIRA-123 or a URL). Nullable.
+    reference   TEXT,
 
     -- OPEN is the neutral state; the engine decides READY vs BLOCKED from it.
     declared_status TEXT NOT NULL DEFAULT 'OPEN'
