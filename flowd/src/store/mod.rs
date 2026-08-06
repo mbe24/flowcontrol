@@ -3,7 +3,10 @@
 
 use std::sync::Arc;
 
-use crate::generated::fctrl_v1 as pb;
+use crate::generated::flow_v1 as pb;
+
+mod sqlite;
+pub use sqlite::SqliteStore;
 
 /// Read-only view of the store the gRPC read handlers need. Mutations come in a
 /// later iteration.

@@ -889,5 +889,5 @@ impl EventKind {
         }
     }
 }
-include!("fctrl.v1.tonic.rs");
+include!("flow.v1.tonic.rs");
 // @@protoc_insertion_point(module)

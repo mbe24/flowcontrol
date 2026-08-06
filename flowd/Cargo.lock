@@ -428,6 +428,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+ "tokio-stream",
  "tonic",
  "tonic-web",
  "tower 0.5.3",
