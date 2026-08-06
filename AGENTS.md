@@ -13,6 +13,6 @@ Use Conventional Commits with a scope on the enclosing directory. Imperative moo
 
 ## DeepSeek: editing files (only in this harness)
 
-In this current Codex harness, `apply_patch` fails on multi-line patches (the end marker is lost through the Windows argv shim). Edit via a small `.ps1` script using `[System.IO.File]::WriteAllLines/WriteAllText`; build multi-line strings with `[char]10`; use exact-string `.Replace()` with a `Contains` guard (never delete by line index); re-verify after edits; and delete the script after.
+To safely edit text, hold the replacement in a double-quoted here-string (`@"..."@`) and swap it with exact `.Replace(old, new)` behind a `Contains` guard. Caveat: a literal dollar sign must be escaped by a preceding backtick.
 
-Note: this applies to the current harness and may be outdated for future versions — re-test `apply_patch` before relying on it.
+Note: may be outdated, in future Codex versions — re-test the here-string approach first.
