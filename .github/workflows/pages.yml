@@ -1,6 +1,6 @@
 name: Deploy web app to GitHub Pages
 
-# Builds fctrl-web (Vite/Svelte static) and deploys it to GitHub Pages.
+# Builds flowui (Vite/Svelte static) and deploys it to GitHub Pages.
 # Pages source must be set to "GitHub Actions" in the repo settings.
 # Manual only (Actions → "Run workflow") — no auto-deploy on push.
 on:
@@ -27,11 +27,11 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: fctrl-web/package-lock.json
+          cache-dependency-path: flowui/package-lock.json
 
       # BASE_PATH = the project-site subpath (/<repo>); a user/org site would use "".
       - name: Install + build the web app
-        working-directory: fctrl-web
+        working-directory: flowui
         env:
           BASE_PATH: /${{ github.event.repository.name }}
         run: |
@@ -42,7 +42,7 @@ jobs:
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: fctrl-web/dist
+          path: flowui/dist
 
   deploy:
     needs: build

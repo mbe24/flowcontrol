@@ -1,4 +1,4 @@
-# fctrl — terminal UI
+# flowcli — terminal UI
 
 Go + Bubble Tea prototype of the FlowControl TUI. Fixture data only; no engine
 attached. Screens follow `FlowControl TUI v2.dc.html`.
@@ -6,7 +6,7 @@ attached. Screens follow `FlowControl TUI v2.dc.html`.
 ## Run
 
 ```
-cd flowcontrol/fctrl
+cd flowcontrol/flowcli
 go mod tidy
 go run .
 ```

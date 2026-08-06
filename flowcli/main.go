@@ -1,4 +1,4 @@
-// Command fctrl is the FlowControl terminal UI.
+// Command flowcli is the FlowControl terminal UI.
 //
 // It talks to a store.Store. Today that is an in-memory fixture; swap the one
 // line in main for a client that speaks to the Rust core over a named pipe or
@@ -11,8 +11,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"fctrl/internal/store"
-	"fctrl/internal/ui"
+	"flowcli/internal/store"
+	"flowcli/internal/ui"
 )
 
 func main() {
@@ -20,7 +20,7 @@ func main() {
 
 	p := tea.NewProgram(ui.New(s), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "fctrl:", err)
+		fmt.Fprintln(os.Stderr, "flowcli:", err)
 		os.Exit(1)
 	}
 }

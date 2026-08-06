@@ -1,4 +1,4 @@
-module fctrl
+module flowcli
 
 go 1.25.0
 

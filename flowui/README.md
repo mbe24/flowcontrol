@@ -1,4 +1,4 @@
-# fctrl-web — Svelte prototype
+# flowui — Svelte prototype
 
 Svelte 5 + Vite + TypeScript prototype of the web app designed in
 `FlowControl.dc.html`. Fixture data only; no engine attached.
@@ -6,7 +6,7 @@ Svelte 5 + Vite + TypeScript prototype of the web app designed in
 ## Run
 
 ```
-cd flowcontrol/fctrl-web
+cd flowcontrol/flowui
 npm install
 npm run dev
 ```

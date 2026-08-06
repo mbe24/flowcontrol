@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"fctrl/internal/store"
-	"fctrl/internal/styles"
+	"flowcli/internal/store"
+	"flowcli/internal/styles"
 )
 
 // box draws a small centred overlay panel below the main screen.

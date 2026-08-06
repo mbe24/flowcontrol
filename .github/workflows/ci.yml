@@ -8,7 +8,7 @@ on:
 
 jobs:
   web:
-    name: Web (fctrl-web · check · build)
+    name: Web (flowui · check · build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -17,34 +17,34 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: fctrl-web/package-lock.json
+          cache-dependency-path: flowui/package-lock.json
 
       - name: Install dependencies
-        working-directory: fctrl-web
+        working-directory: flowui
         run: npm ci
 
       - name: Type + Svelte check
-        working-directory: fctrl-web
+        working-directory: flowui
         run: npm run check
 
       - name: Build
-        working-directory: fctrl-web
+        working-directory: flowui
         run: npm run build
 
   go:
-    name: Go TUI (fctrl · vet · build)
+    name: Go TUI (flowcli · vet · build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: fctrl/go.mod
+          go-version-file: flowcli/go.mod
 
       - name: Vet
-        working-directory: fctrl
+        working-directory: flowcli
         run: go vet ./...
 
       - name: Build
-        working-directory: fctrl
+        working-directory: flowcli
         run: go build ./...

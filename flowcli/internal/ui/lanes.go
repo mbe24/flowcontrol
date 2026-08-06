@@ -6,8 +6,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"fctrl/internal/store"
-	"fctrl/internal/styles"
+	"flowcli/internal/store"
+	"flowcli/internal/styles"
 )
 
 // laneSet picks how many lanes fit. Thresholds are derived from the card
@@ -216,7 +216,7 @@ func (m Model) viewLanes(w, h int) string {
 		body = append(body, "   "+strings.Join(dots, " "))
 	}
 
-	return frame("fctrl ─ lanes", body, keys, inner, h)
+	return frame("flowcli ─ lanes", body, keys, inner, h)
 }
 
 func padTrunc(s string, w int) string {

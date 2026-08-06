@@ -6,8 +6,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"fctrl/internal/store"
-	"fctrl/internal/styles"
+	"flowcli/internal/store"
+	"flowcli/internal/styles"
 )
 
 // chainRow is one line of the dependency spine. Prefix carries the box-drawing

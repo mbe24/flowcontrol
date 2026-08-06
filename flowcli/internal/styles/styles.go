@@ -5,7 +5,7 @@ package styles
 import (
 	"github.com/charmbracelet/lipgloss"
 
-	"fctrl/internal/store"
+	"flowcli/internal/store"
 )
 
 var (

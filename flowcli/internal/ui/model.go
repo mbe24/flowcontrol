@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
 
-	"fctrl/internal/store"
+	"flowcli/internal/store"
 )
 
 type Screen int

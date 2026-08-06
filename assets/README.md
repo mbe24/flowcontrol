@@ -38,7 +38,7 @@ READY #3ecf8e   BLOCKED #ef6a5a   DEFERRED #7c8394   DONE #3f6b8f
 ## Type
 
 IBM Plex Sans 600 for the wordmark (`flow` at full strength, `control` at 50%),
-IBM Plex Mono 500 for `fctrl`. The lockup SVGs reference both by name — if a
+IBM Plex Mono 500 for `flowcli`. The lockup SVGs reference both by name — if a
 consumer doesn't have Plex installed the text falls back to system UI, so use
 `logo-lockup-dark.png` where fidelity matters, or outline the text in your
 vector editor before shipping the SVG externally.

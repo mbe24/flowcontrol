@@ -6,8 +6,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"fctrl/internal/store"
-	"fctrl/internal/styles"
+	"flowcli/internal/store"
+	"flowcli/internal/styles"
 )
 
 func key(s string) string { return styles.AccentS.Render(s) }
@@ -177,7 +177,7 @@ func (m Model) viewTree(w, h int) string {
 
 	keys := key("j/k") + " move  " + key("h/l") + " fold  " + key("ret") + " detail  " +
 		key("2") + " lanes  " + key("3") + " chain  " + key("/") + " find  " + key("s") + " status"
-	title := "fctrl ─ " + m.projectName()
+	title := "flowcli ─ " + m.projectName()
 	return frame(title, body, keys, inner, h)
 }
 

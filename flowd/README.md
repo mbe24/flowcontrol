@@ -98,7 +98,7 @@ writing through MCP.
 
 ## 3. Protobuf
 
-`../proto/fctrl/v1/fctrl.proto`.
+`../proto/flow/v1/flow.proto`.
 
 Deliberate choices:
 
@@ -121,11 +121,11 @@ Deliberate choices:
 
 ```
 flowcontrol/
-  fctrld/                   Rust — tonic + sqlx
+  flowd/                   Rust — tonic + sqlx
     migrations/             .sql, checked into git
-  proto/fctrl/v1/
-  fctrl/                    Go TUI       → generated client
-  fctrl-web/                Svelte app   → generated client via grpc-web
+  proto/flow/v1/
+  flowcli/                    Go TUI       → generated client
+  flowui/                Svelte app   → generated client via grpc-web
 ```
 
 ## What I would build first

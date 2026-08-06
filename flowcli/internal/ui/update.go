@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"fctrl/internal/store"
+	"flowcli/internal/store"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
