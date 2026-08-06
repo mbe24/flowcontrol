@@ -1,2 +1,5 @@
 # Rust build output
 /target
+
+# Local environment overrides (do not commit)
+.env

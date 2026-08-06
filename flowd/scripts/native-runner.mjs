@@ -7,11 +7,27 @@
 // named cache volumes for the cargo registry and target dir, and redirects
 // CARGO_TARGET_DIR off the mount so container rebuilds are incremental.
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const CRATE = path.join(REPO, 'flowd');
+
+// Load flowd/.env into process.env (without overwriting a real env var) so a
+// host can pin FLOWD_NATIVE_RUNNER per-machine without editing committed files.
+function loadDotEnv() {
+  const p = path.join(CRATE, '.env');
+  if (!fs.existsSync(p)) return;
+  for (const line of fs.readFileSync(p, 'utf8').split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!m) continue;
+    const [, k, v] = m;
+    if (process.env[k] === undefined) process.env[k] = v;
+  }
+}
+loadDotEnv();
+
 export const RUNNER = (process.env.FLOWD_NATIVE_RUNNER || 'auto').toLowerCase();
 export const IMAGE = process.env.FLOWD_NATIVE_IMAGE || 'rust:1-slim-bookworm';
 export const REGISTRY_VOLUME = 'flowd-cargo';
