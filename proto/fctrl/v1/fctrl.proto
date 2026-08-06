@@ -16,70 +16,119 @@ package fctrl.v1;
 
 // ─── enums ───────────────────────────────────────────────────────────────────
 
+// The structural kind of a node. There is exactly one node table; kind plus
+// parent_id reconstructs the Work Package → Task → Step hierarchy at read time.
 enum NodeKind {
+  // Unset; never a valid stored value.
   NODE_KIND_UNSPECIFIED = 0;
+  // A top-level bucket of related work. Always the root of a subtree.
   NODE_KIND_WORK_PACKAGE = 1;
+  // The core unit of execution; carries a condition an agent can verify.
   NODE_KIND_TASK = 2;
+  // A granular, linear sub-action nested inside a task.
   NODE_KIND_STEP = 3;
 }
 
-// What a human or agent SET on a node.
+// What a human or agent SET on a node. The engine never computes this — it is
+// the client's intent, not the engine's answer.
 enum DeclaredStatus {
+  // Unset / unknown.
   DECLARED_STATUS_UNSPECIFIED = 0;
+  // Open: the node exists and is meant to be worked. The engine derives
+  // READY vs BLOCKED from this plus the dependency graph.
   DECLARED_STATUS_OPEN = 1;
+  // Manually paused or sidelined. Downstream nodes are treated as blocked.
   DECLARED_STATUS_DEFERRED = 2;
+  // Completed, usually after verification.
   DECLARED_STATUS_DONE = 3;
 }
 
-// What the engine COMPUTED. Never sent on a write — the core owns this.
+// What the engine COMPUTED for a node. Never sent on a write — the core owns
+// this value, derived from declared status and the dependency DAG.
 enum EffectiveStatus {
+  // Unset / unknown.
   EFFECTIVE_STATUS_UNSPECIFIED = 0;
+  // No unfulfilled blockers; safe to start.
   EFFECTIVE_STATUS_READY = 1;
+  // One or more direct blockers are not done.
   EFFECTIVE_STATUS_BLOCKED = 2;
+  // The node (or an ancestor) is deferred.
   EFFECTIVE_STATUS_DEFERRED = 3;
+  // Finished.
   EFFECTIVE_STATUS_DONE = 4;
 }
 
+// Explicit lifecycle of a WORK_PACKAGE, set by a human. Not derived.
 enum WorkPackageState {
+  // Unset.
   WORK_PACKAGE_STATE_UNSPECIFIED = 0;
+  // Proposed; not yet being executed.
   WORK_PACKAGE_STATE_PLANNED = 1;
+  // Currently being executed.
   WORK_PACKAGE_STATE_ACTIVE = 2;
+  // Work is complete.
   WORK_PACKAGE_STATE_DONE = 3;
+  // Retired from view.
   WORK_PACKAGE_STATE_ARCHIVED = 4;
 }
 
+// Outcome reported by an agent that ran a condition. Never computed.
 enum AgentResult {
-  AGENT_RESULT_UNSPECIFIED = 0;  // never reported
+  // No report yet.
+  AGENT_RESULT_UNSPECIFIED = 0;
+  // The condition held.
   AGENT_RESULT_PASS = 1;
+  // The condition failed.
   AGENT_RESULT_FAIL = 2;
 }
 
+// A human operator's decision about an agent report. Independent of it.
 enum HumanVerdict {
-  HUMAN_VERDICT_UNSPECIFIED = 0;  // no override
+  // No override has been recorded.
+  HUMAN_VERDICT_UNSPECIFIED = 0;
+  // The operator accepts the result as-is.
   HUMAN_VERDICT_ACCEPTED = 1;
+  // The operator rejects the reported result.
   HUMAN_VERDICT_REJECTED = 2;
 }
 
+// The type of a change recorded in the event log.
 enum EventKind {
+  // Unset.
   EVENT_KIND_UNSPECIFIED = 0;
+  // A node was created.
   EVENT_KIND_NODE_CREATED = 1;
+  // A node was edited.
   EVENT_KIND_NODE_UPDATED = 2;
+  // A node was deleted.
   EVENT_KIND_NODE_DELETED = 3;
+  // A node's declared status changed.
   EVENT_KIND_STATUS_SET = 4;
+  // A dependency edge was added.
   EVENT_KIND_DEP_ADDED = 5;
+  // A dependency edge was removed.
   EVENT_KIND_DEP_REMOVED = 6;
+  // An agent reported a condition result.
   EVENT_KIND_AGENT_REPORTED = 7;
+  // A human set (or cleared) a verdict.
   EVENT_KIND_VERDICT_SET = 8;
+  // A comment was added.
   EVENT_KIND_COMMENT = 9;
 }
 
 // ─── entities ────────────────────────────────────────────────────────────────
 
+// A top-level workspace that silos work. Dependency edges never cross projects.
 message Project {
+  // Immutable unique identifier.
   string id = 1;
+  // Display name.
   string name = 2;
+  // Short goal or context.
   string description = 3;
-  int64 created_at = 4;      // unix seconds
+  // Unix seconds when the project was created.
+  int64 created_at = 4;
+  // True once the project is retired from active view.
   bool archived = 5;
 }
 
@@ -87,89 +136,130 @@ message Project {
 // the operator's verdict are both facts, and the interesting case — an operator
 // accepting over a reported failure — needs both to survive.
 message Verification {
+  // What the agent reported. Null (UNSPECIFIED) until a report exists.
   AgentResult agent_result = 1;
+  // Display name of the agent that reported.
   string agent_name = 2;
+  // Unix seconds when the report landed.
   int64 agent_at = 3;
-  string agent_detail = 4;   // exit code, failing assertions, log tail
-
+  // Free text: exit code, failing assertions, or a log tail.
+  string agent_detail = 4;
+  // The operator's acceptance. UNSPECIFIED means none recorded.
   HumanVerdict human_verdict = 5;
+  // Unix seconds when the verdict was set.
   int64 human_at = 6;
-
-  // True when the node changed after the agent's report — the clients show the
+  // True when the node changed after the agent's report — clients show the
   // report as out of date rather than trusting it.
   bool stale = 7;
 }
 
+// A single node in the flat node table: a work package, task, or step.
 message Node {
+  // Immutable unique identifier.
   string id = 1;
+  // Owning project.
   string project_id = 2;
-  string parent_id = 3;      // empty for a work package
+  // Parent in the hierarchy; empty for a work package.
+  string parent_id = 3;
+  // Structural kind (work package / task / step).
   NodeKind kind = 4;
-
+  // Display title.
   string title = 5;
-  string description = 6;    // markdown
-  string condition = 7;      // the core NEVER executes this
-
+  // Markdown body. Rendered by clients, never by the core.
+  string description = 6;
+  // Free-text rule the agent verifies. The core NEVER executes this.
+  string condition = 7;
+  // What the human/agent set: OPEN, DEFERRED or DONE.
   DeclaredStatus declared_status = 8;
   // Computed by the engine. Read-only for clients.
   EffectiveStatus status = 9;
-
-  WorkPackageState wp_state = 10;  // work packages only
+  // Lifecycle state; work packages only.
+  WorkPackageState wp_state = 10;
+  // Sibling ordering. Sparse so a reorder is one update.
   int32 position = 11;
-
+  // Latest agent report + operator verdict for this node.
   Verification verification = 12;
-
+  // Unix seconds when the node was created.
   int64 created_at = 13;
+  // Unix seconds of the last change (excludes verification churn).
   int64 updated_at = 14;
 }
 
+// A directed edge in the dependency DAG: blocker must be done before blocked.
 message Dependency {
+  // The node that must complete first.
   string blocker_id = 1;
+  // The node that waits on the blocker.
   string blocked_id = 2;
 }
 
+// One append-only change record: activity feed, Watch stream, and undo log.
 message Event {
-  int64 seq = 1;             // monotonic per database; the resume cursor
+  // Monotonic per database; the resume cursor for Watch.
+  int64 seq = 1;
+  // Owning project.
   string project_id = 2;
+  // Affected node; empty for project-level events.
   string node_id = 3;
+  // What changed.
   EventKind kind = 4;
-  string author = 5;         // plain name; agents get no special treatment
-  string summary = 6;        // the activity-feed line
-  string payload_json = 7;   // before/after, for undo
+  // Plain name of the author; agents get no special treatment.
+  string author = 5;
+  // Human-readable line for the activity feed.
+  string summary = 6;
+  // Before/after payload as JSON, enabling undo.
+  string payload_json = 7;
+  // Unix seconds when the event was recorded.
   int64 created_at = 8;
 }
 
-// Progress counts for a work package. Computed server-side so the two clients
+// Progress counts for a work package, computed server-side so the two clients
 // cannot disagree about what "44% done" means.
 message Progress {
+  // The work package these counts belong to.
   string work_package_id = 1;
+  // Total leaf units counted.
   int32 total = 2;
+  // Units in DONE.
   int32 done = 3;
+  // Units in READY.
   int32 ready = 4;
+  // Units in BLOCKED.
   int32 blocked = 5;
+  // Units deferred.
   int32 deferred = 6;
 }
 
 // ─── reads ───────────────────────────────────────────────────────────────────
 
+// Lists the projects a client can open.
 message ListProjectsRequest {
+  // Include projects marked archived.
   bool include_archived = 1;
 }
 
+// The result of listing projects.
 message ListProjectsResponse {
+  // The projects, ordered for display.
   repeated Project projects = 1;
 }
 
 // One round trip for everything a client needs to paint. Both front doors open
-// with this, then hold Watch open from `seq`.
+// with this, then hold Watch open from seq.
 message GetSnapshotRequest {
+  // The project to load.
   string project_id = 1;
 }
 
+// A consistent view of one project at a point in time.
 message GetSnapshotResponse {
+  // The project itself.
   Project project = 1;
+  // Every node in the project.
   repeated Node nodes = 2;
+  // Every dependency edge in the project.
   repeated Dependency dependencies = 3;
+  // Progress per work package.
   repeated Progress progress = 4;
   // Recent activity only — full history is paged through ListEvents.
   repeated Event recent_events = 5;
@@ -177,48 +267,64 @@ message GetSnapshotResponse {
   int64 seq = 6;
 }
 
+// Pages the event log backwards for a project (optionally a node).
 message ListEventsRequest {
+  // The project to page.
   string project_id = 1;
-  string node_id = 2;        // optional filter
-  int64 before_seq = 3;      // paging backwards; 0 for most recent
+  // Optional filter to a single node.
+  string node_id = 2;
+  // Page boundary; events with seq strictly below this. 0 for the most recent.
+  int64 before_seq = 3;
+  // Max events to return.
   int32 limit = 4;
 }
 
+// One page of events.
 message ListEventsResponse {
+  // The events in this page (newest first).
   repeated Event events = 1;
+  // True if more pages exist before this one.
   bool has_more = 2;
 }
 
+// Full-text search over node titles and descriptions within a project.
 message SearchRequest {
+  // Scope the search to one project.
   string project_id = 1;
+  // The query text.
   string query = 2;
+  // Max results to return.
   int32 limit = 3;
 }
 
+// The result of a search.
 message SearchResponse {
+  // Matching nodes.
   repeated Node nodes = 1;
 }
 
 // ─── the push channel ────────────────────────────────────────────────────────
 
+// Opens the long-lived change stream for a project.
 message WatchRequest {
+  // The project to watch.
   string project_id = 1;
   // Last seq the client applied. 0 means "from now". If the gap is wider than
-  // the server's retention, it answers with resync_required instead of events.
+  // the server's retention it answers with resync_required instead of events.
   int64 from_seq = 2;
 }
 
-// A cascade is one logical change producing many node changes, so the unit on
-// the wire is a batch, not a single node. A client applies the whole batch or
-// none of it.
+// A batch of changes pushed to a watcher.
 message WatchResponse {
+  // Events produced by the change(s).
   repeated Event events = 1;
-  // Every node whose EFFECTIVE status changed as a result — this is the
-  // cascade, computed once by the engine rather than by each client.
+  // Every node whose EFFECTIVE status changed — the cascade, computed once by
+  // the engine rather than by each client.
   repeated Node changed_nodes = 2;
+  // Progress deltas that changed.
   repeated Progress changed_progress = 3;
+  // The new cursor after these events.
   int64 seq = 4;
-
   // The client's from_seq is too old. Call GetSnapshot again and restart.
   bool resync_required = 5;
   // Sent every 30s with no other content, so a client can tell a quiet server
@@ -228,46 +334,71 @@ message WatchResponse {
 
 // ─── writes ──────────────────────────────────────────────────────────────────
 
-// Every mutation carries the author and an idempotency key. Agents retry; the
-// key stops a retried SetStatus from writing two events.
+// Common metadata attached to every mutation.
 message WriteMeta {
+  // Plain name of the author (human or agent).
   string author = 1;
+  // Idempotency key; a retried request with the same key writes one event.
   string idempotency_key = 2;
 }
 
+// Creates a new node under an optional parent.
 message CreateNodeRequest {
+  // Author + idempotency key.
   WriteMeta meta = 1;
+  // Owning project.
   string project_id = 2;
+  // Parent id; empty for a work package.
   string parent_id = 3;
+  // Structural kind.
   NodeKind kind = 4;
+  // Display title.
   string title = 5;
+  // Markdown body.
   string description = 6;
+  // Condition the agent verifies (optional).
   string condition = 7;
+  // Sibling ordering.
   int32 position = 8;
 }
 
+// Edits editable fields of an existing node.
 message UpdateNodeRequest {
+  // Author + idempotency key.
   WriteMeta meta = 1;
+  // The node to update.
   string node_id = 2;
-  // Only the fields named here are written.
-  repeated string update_mask = 3;  // "title" | "description" | "condition" | "position" | "wp_state"
+  // Only the fields named here are written. Allowed: title, description,
+  // condition, position, wp_state.
+  repeated string update_mask = 3;
+  // New title, when masked.
   string title = 4;
+  // New markdown body, when masked.
   string description = 5;
+  // New condition, when masked.
   string condition = 6;
+  // New position, when masked.
   int32 position = 7;
+  // New work-package state, when masked (work packages only).
   WorkPackageState wp_state = 8;
 }
 
+// Deletes a node and its subtree.
 message DeleteNodeRequest {
+  // Author + idempotency key.
   WriteMeta meta = 1;
+  // The node to delete.
   string node_id = 2;
-  // Reject the delete if the node still has dependents, rather than silently
-  // orphaning edges.
+  // Reject if the node still has dependents, rather than silently orphaning
+  // edges.
   bool fail_if_referenced = 3;
 }
 
+// Sets a node's declared status (the client's intent).
 message SetStatusRequest {
+  // Author + idempotency key.
   WriteMeta meta = 1;
+  // The node to update.
   string node_id = 2;
   // OPEN, DEFERRED or DONE. READY and BLOCKED are not settable — they are the
   // engine's answer, not the client's request.
@@ -276,111 +407,171 @@ message SetStatusRequest {
 
 // Called by agents. The core records the report; it does not run the condition.
 message ReportConditionRequest {
+  // Author + idempotency key.
   WriteMeta meta = 1;
+  // The node whose condition was checked.
   string node_id = 2;
+  // The reported outcome.
   AgentResult result = 3;
+  // Free text detail attached to the report.
   string detail = 4;
 }
 
 // Called by humans. Independent of what the agent reported.
 message SetVerdictRequest {
+  // Author + idempotency key.
   WriteMeta meta = 1;
+  // The node the verdict applies to.
   string node_id = 2;
-  HumanVerdict verdict = 3;  // UNSPECIFIED clears the override
+  // ACCEPTED / REJECTED; UNSPECIFIED clears the override.
+  HumanVerdict verdict = 3;
 }
 
+// Appends a comment to a node.
 message AddCommentRequest {
+  // Author + idempotency key.
   WriteMeta meta = 1;
+  // The node being commented on.
   string node_id = 2;
+  // The comment text.
   string text = 3;
 }
 
+// Adds a dependency edge.
 message AddDependencyRequest {
+  // Author + idempotency key.
   WriteMeta meta = 1;
+  // The node that must complete first.
   string blocker_id = 2;
+  // The node that waits.
   string blocked_id = 3;
 }
 
+// Removes a dependency edge.
 message RemoveDependencyRequest {
+  // Author + idempotency key.
   WriteMeta meta = 1;
+  // The blocker side of the edge to remove.
   string blocker_id = 2;
+  // The blocked side of the edge to remove.
   string blocked_id = 3;
 }
 
+// Reverses a previous event.
 message UndoRequest {
+  // Author + idempotency key.
   WriteMeta meta = 1;
+  // The project the event belongs to.
   string project_id = 2;
-  int64 seq = 3;             // the event to reverse; 0 for the most recent
+  // The event to reverse; 0 for the most recent.
+  int64 seq = 3;
 }
 
-// Every mutation answers the same shape: what changed, and the new cursor.
-// A client that trusts the stream can ignore the body and keep the seq.
+// The payload of any successful mutation, shared by every mutation RPC so all
+// of them and the Watch stream use one apply-path.
 message Mutation {
+  // Events the mutation produced.
   repeated Event events = 1;
+  // Nodes whose effective status changed as a result.
   repeated Node changed_nodes = 2;
+  // Progress deltas that changed.
   repeated Progress changed_progress = 3;
+  // The new cursor after this mutation.
   int64 seq = 4;
 }
 
+// Result of creating a node.
 message CreateNodeResponse {
+  // The mutation payload.
   Mutation mutation = 1;
 }
 
+// Result of updating a node.
 message UpdateNodeResponse {
+  // The mutation payload.
   Mutation mutation = 1;
 }
 
+// Result of deleting a node.
 message DeleteNodeResponse {
+  // The mutation payload.
   Mutation mutation = 1;
 }
 
+// Result of setting a status.
 message SetStatusResponse {
+  // The mutation payload.
   Mutation mutation = 1;
 }
 
+// Result of reporting a condition.
 message ReportConditionResponse {
+  // The mutation payload.
   Mutation mutation = 1;
 }
 
+// Result of setting a verdict.
 message SetVerdictResponse {
+  // The mutation payload.
   Mutation mutation = 1;
 }
 
+// Result of adding a comment.
 message AddCommentResponse {
+  // The mutation payload.
   Mutation mutation = 1;
 }
 
+// Result of adding a dependency.
 message AddDependencyResponse {
+  // The mutation payload.
   Mutation mutation = 1;
 }
 
+// Result of removing a dependency.
 message RemoveDependencyResponse {
+  // The mutation payload.
   Mutation mutation = 1;
 }
 
+// Result of undoing a prior event.
 message UndoResponse {
+  // The mutation payload.
   Mutation mutation = 1;
 }
 
 // ─── service ─────────────────────────────────────────────────────────────────
 
+// The FlowControl core API: reads, the Watch stream, and mutations.
 service FlowService {
+  // Lists projects the client can open.
   rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+  // Loads a full, consistent snapshot of one project.
   rpc GetSnapshot(GetSnapshotRequest) returns (GetSnapshotResponse);
+  // Pages the event log for a project.
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+  // Full-text searches nodes within a project.
   rpc Search(SearchRequest) returns (SearchResponse);
-
   // The one long-lived call. Every client holds exactly one.
   rpc Watch(WatchRequest) returns (stream WatchResponse);
-
+  // Creates a node.
   rpc CreateNode(CreateNodeRequest) returns (CreateNodeResponse);
+  // Updates editable fields of a node.
   rpc UpdateNode(UpdateNodeRequest) returns (UpdateNodeResponse);
+  // Deletes a node and its subtree.
   rpc DeleteNode(DeleteNodeRequest) returns (DeleteNodeResponse);
+  // Sets a node's declared status.
   rpc SetStatus(SetStatusRequest) returns (SetStatusResponse);
+  // Records an agent's condition report.
   rpc ReportCondition(ReportConditionRequest) returns (ReportConditionResponse);
+  // Records a human's verdict over an agent report.
   rpc SetVerdict(SetVerdictRequest) returns (SetVerdictResponse);
+  // Adds a comment to a node.
   rpc AddComment(AddCommentRequest) returns (AddCommentResponse);
+  // Adds a dependency edge.
   rpc AddDependency(AddDependencyRequest) returns (AddDependencyResponse);
+  // Removes a dependency edge.
   rpc RemoveDependency(RemoveDependencyRequest) returns (RemoveDependencyResponse);
+  // Reverses a prior event.
   rpc Undo(UndoRequest) returns (UndoResponse);
 }
