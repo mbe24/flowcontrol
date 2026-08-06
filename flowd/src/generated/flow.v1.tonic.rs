@@ -106,11 +106,11 @@ pub mod flow_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/ListProjects",
+                "/flow.v1.FlowService/ListProjects",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("fctrl.v1.FlowService", "ListProjects"));
+                .insert(GrpcMethod::new("flow.v1.FlowService", "ListProjects"));
             self.inner.unary(req, path, codec).await
         }
         /** Loads a full, consistent snapshot of one project.
@@ -133,11 +133,11 @@ pub mod flow_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/GetSnapshot",
+                "/flow.v1.FlowService/GetSnapshot",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("fctrl.v1.FlowService", "GetSnapshot"));
+                .insert(GrpcMethod::new("flow.v1.FlowService", "GetSnapshot"));
             self.inner.unary(req, path, codec).await
         }
         /** Pages the event log for a project.
@@ -160,11 +160,11 @@ pub mod flow_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/ListEvents",
+                "/flow.v1.FlowService/ListEvents",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("fctrl.v1.FlowService", "ListEvents"));
+                .insert(GrpcMethod::new("flow.v1.FlowService", "ListEvents"));
             self.inner.unary(req, path, codec).await
         }
         /** Full-text searches nodes within a project.
@@ -184,11 +184,11 @@ pub mod flow_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/Search",
+                "/flow.v1.FlowService/Search",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("fctrl.v1.FlowService", "Search"));
+                .insert(GrpcMethod::new("flow.v1.FlowService", "Search"));
             self.inner.unary(req, path, codec).await
         }
         /** The one long-lived call. Every client holds exactly one.
@@ -211,11 +211,10 @@ pub mod flow_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/Watch",
+                "/flow.v1.FlowService/Watch",
             );
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("fctrl.v1.FlowService", "Watch"));
+            req.extensions_mut().insert(GrpcMethod::new("flow.v1.FlowService", "Watch"));
             self.inner.server_streaming(req, path, codec).await
         }
         /** Creates a node.
@@ -238,11 +237,11 @@ pub mod flow_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/CreateNode",
+                "/flow.v1.FlowService/CreateNode",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("fctrl.v1.FlowService", "CreateNode"));
+                .insert(GrpcMethod::new("flow.v1.FlowService", "CreateNode"));
             self.inner.unary(req, path, codec).await
         }
         /** Updates editable fields of a node.
@@ -265,11 +264,11 @@ pub mod flow_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/UpdateNode",
+                "/flow.v1.FlowService/UpdateNode",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("fctrl.v1.FlowService", "UpdateNode"));
+                .insert(GrpcMethod::new("flow.v1.FlowService", "UpdateNode"));
             self.inner.unary(req, path, codec).await
         }
         /** Deletes a node and its subtree.
@@ -292,11 +291,11 @@ pub mod flow_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/DeleteNode",
+                "/flow.v1.FlowService/DeleteNode",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("fctrl.v1.FlowService", "DeleteNode"));
+                .insert(GrpcMethod::new("flow.v1.FlowService", "DeleteNode"));
             self.inner.unary(req, path, codec).await
         }
         /** Sets a node's declared status.
@@ -319,11 +318,11 @@ pub mod flow_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/SetStatus",
+                "/flow.v1.FlowService/SetStatus",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("fctrl.v1.FlowService", "SetStatus"));
+                .insert(GrpcMethod::new("flow.v1.FlowService", "SetStatus"));
             self.inner.unary(req, path, codec).await
         }
         /** Records an agent's condition report.
@@ -346,11 +345,11 @@ pub mod flow_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/ReportCondition",
+                "/flow.v1.FlowService/ReportCondition",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("fctrl.v1.FlowService", "ReportCondition"));
+                .insert(GrpcMethod::new("flow.v1.FlowService", "ReportCondition"));
             self.inner.unary(req, path, codec).await
         }
         /** Records a human's verdict over an agent report.
@@ -373,11 +372,11 @@ pub mod flow_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/SetVerdict",
+                "/flow.v1.FlowService/SetVerdict",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("fctrl.v1.FlowService", "SetVerdict"));
+                .insert(GrpcMethod::new("flow.v1.FlowService", "SetVerdict"));
             self.inner.unary(req, path, codec).await
         }
         /** Adds a comment to a node.
@@ -400,11 +399,11 @@ pub mod flow_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/AddComment",
+                "/flow.v1.FlowService/AddComment",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("fctrl.v1.FlowService", "AddComment"));
+                .insert(GrpcMethod::new("flow.v1.FlowService", "AddComment"));
             self.inner.unary(req, path, codec).await
         }
         /** Adds a dependency edge.
@@ -427,11 +426,11 @@ pub mod flow_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/AddDependency",
+                "/flow.v1.FlowService/AddDependency",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("fctrl.v1.FlowService", "AddDependency"));
+                .insert(GrpcMethod::new("flow.v1.FlowService", "AddDependency"));
             self.inner.unary(req, path, codec).await
         }
         /** Removes a dependency edge.
@@ -454,11 +453,11 @@ pub mod flow_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/RemoveDependency",
+                "/flow.v1.FlowService/RemoveDependency",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("fctrl.v1.FlowService", "RemoveDependency"));
+                .insert(GrpcMethod::new("flow.v1.FlowService", "RemoveDependency"));
             self.inner.unary(req, path, codec).await
         }
         /** Reverses a prior event.
@@ -477,11 +476,9 @@ pub mod flow_service_client {
                     )
                 })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/fctrl.v1.FlowService/Undo",
-            );
+            let path = http::uri::PathAndQuery::from_static("/flow.v1.FlowService/Undo");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("fctrl.v1.FlowService", "Undo"));
+            req.extensions_mut().insert(GrpcMethod::new("flow.v1.FlowService", "Undo"));
             self.inner.unary(req, path, codec).await
         }
     }
@@ -707,7 +704,7 @@ pub mod flow_service_server {
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             let inner = self.inner.clone();
             match req.uri().path() {
-                "/fctrl.v1.FlowService/ListProjects" => {
+                "/flow.v1.FlowService/ListProjects" => {
                     #[allow(non_camel_case_types)]
                     struct ListProjectsSvc<T: FlowService>(pub Arc<T>);
                     impl<
@@ -753,7 +750,7 @@ pub mod flow_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/fctrl.v1.FlowService/GetSnapshot" => {
+                "/flow.v1.FlowService/GetSnapshot" => {
                     #[allow(non_camel_case_types)]
                     struct GetSnapshotSvc<T: FlowService>(pub Arc<T>);
                     impl<
@@ -799,7 +796,7 @@ pub mod flow_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/fctrl.v1.FlowService/ListEvents" => {
+                "/flow.v1.FlowService/ListEvents" => {
                     #[allow(non_camel_case_types)]
                     struct ListEventsSvc<T: FlowService>(pub Arc<T>);
                     impl<
@@ -845,7 +842,7 @@ pub mod flow_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/fctrl.v1.FlowService/Search" => {
+                "/flow.v1.FlowService/Search" => {
                     #[allow(non_camel_case_types)]
                     struct SearchSvc<T: FlowService>(pub Arc<T>);
                     impl<
@@ -891,7 +888,7 @@ pub mod flow_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/fctrl.v1.FlowService/Watch" => {
+                "/flow.v1.FlowService/Watch" => {
                     #[allow(non_camel_case_types)]
                     struct WatchSvc<T: FlowService>(pub Arc<T>);
                     impl<
@@ -938,7 +935,7 @@ pub mod flow_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/fctrl.v1.FlowService/CreateNode" => {
+                "/flow.v1.FlowService/CreateNode" => {
                     #[allow(non_camel_case_types)]
                     struct CreateNodeSvc<T: FlowService>(pub Arc<T>);
                     impl<
@@ -984,7 +981,7 @@ pub mod flow_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/fctrl.v1.FlowService/UpdateNode" => {
+                "/flow.v1.FlowService/UpdateNode" => {
                     #[allow(non_camel_case_types)]
                     struct UpdateNodeSvc<T: FlowService>(pub Arc<T>);
                     impl<
@@ -1030,7 +1027,7 @@ pub mod flow_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/fctrl.v1.FlowService/DeleteNode" => {
+                "/flow.v1.FlowService/DeleteNode" => {
                     #[allow(non_camel_case_types)]
                     struct DeleteNodeSvc<T: FlowService>(pub Arc<T>);
                     impl<
@@ -1076,7 +1073,7 @@ pub mod flow_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/fctrl.v1.FlowService/SetStatus" => {
+                "/flow.v1.FlowService/SetStatus" => {
                     #[allow(non_camel_case_types)]
                     struct SetStatusSvc<T: FlowService>(pub Arc<T>);
                     impl<
@@ -1122,7 +1119,7 @@ pub mod flow_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/fctrl.v1.FlowService/ReportCondition" => {
+                "/flow.v1.FlowService/ReportCondition" => {
                     #[allow(non_camel_case_types)]
                     struct ReportConditionSvc<T: FlowService>(pub Arc<T>);
                     impl<
@@ -1168,7 +1165,7 @@ pub mod flow_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/fctrl.v1.FlowService/SetVerdict" => {
+                "/flow.v1.FlowService/SetVerdict" => {
                     #[allow(non_camel_case_types)]
                     struct SetVerdictSvc<T: FlowService>(pub Arc<T>);
                     impl<
@@ -1214,7 +1211,7 @@ pub mod flow_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/fctrl.v1.FlowService/AddComment" => {
+                "/flow.v1.FlowService/AddComment" => {
                     #[allow(non_camel_case_types)]
                     struct AddCommentSvc<T: FlowService>(pub Arc<T>);
                     impl<
@@ -1260,7 +1257,7 @@ pub mod flow_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/fctrl.v1.FlowService/AddDependency" => {
+                "/flow.v1.FlowService/AddDependency" => {
                     #[allow(non_camel_case_types)]
                     struct AddDependencySvc<T: FlowService>(pub Arc<T>);
                     impl<
@@ -1306,7 +1303,7 @@ pub mod flow_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/fctrl.v1.FlowService/RemoveDependency" => {
+                "/flow.v1.FlowService/RemoveDependency" => {
                     #[allow(non_camel_case_types)]
                     struct RemoveDependencySvc<T: FlowService>(pub Arc<T>);
                     impl<
@@ -1352,7 +1349,7 @@ pub mod flow_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/fctrl.v1.FlowService/Undo" => {
+                "/flow.v1.FlowService/Undo" => {
                     #[allow(non_camel_case_types)]
                     struct UndoSvc<T: FlowService>(pub Arc<T>);
                     impl<T: FlowService> tonic::server::UnaryService<super::UndoRequest>
@@ -1434,6 +1431,6 @@ pub mod flow_service_server {
         }
     }
     impl<T: FlowService> tonic::server::NamedService for FlowServiceServer<T> {
-        const NAME: &'static str = "fctrl.v1.FlowService";
+        const NAME: &'static str = "flow.v1.FlowService";
     }
 }

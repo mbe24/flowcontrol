@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             (unknown)
-// source: fctrl/v1/fctrl.proto
+// source: flow/v1/flow.proto
 
-package fctrlv1
+package flowv1
 
 import (
 	context "context"
@@ -19,21 +19,21 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	FlowService_ListProjects_FullMethodName     = "/fctrl.v1.FlowService/ListProjects"
-	FlowService_GetSnapshot_FullMethodName      = "/fctrl.v1.FlowService/GetSnapshot"
-	FlowService_ListEvents_FullMethodName       = "/fctrl.v1.FlowService/ListEvents"
-	FlowService_Search_FullMethodName           = "/fctrl.v1.FlowService/Search"
-	FlowService_Watch_FullMethodName            = "/fctrl.v1.FlowService/Watch"
-	FlowService_CreateNode_FullMethodName       = "/fctrl.v1.FlowService/CreateNode"
-	FlowService_UpdateNode_FullMethodName       = "/fctrl.v1.FlowService/UpdateNode"
-	FlowService_DeleteNode_FullMethodName       = "/fctrl.v1.FlowService/DeleteNode"
-	FlowService_SetStatus_FullMethodName        = "/fctrl.v1.FlowService/SetStatus"
-	FlowService_ReportCondition_FullMethodName  = "/fctrl.v1.FlowService/ReportCondition"
-	FlowService_SetVerdict_FullMethodName       = "/fctrl.v1.FlowService/SetVerdict"
-	FlowService_AddComment_FullMethodName       = "/fctrl.v1.FlowService/AddComment"
-	FlowService_AddDependency_FullMethodName    = "/fctrl.v1.FlowService/AddDependency"
-	FlowService_RemoveDependency_FullMethodName = "/fctrl.v1.FlowService/RemoveDependency"
-	FlowService_Undo_FullMethodName             = "/fctrl.v1.FlowService/Undo"
+	FlowService_ListProjects_FullMethodName     = "/flow.v1.FlowService/ListProjects"
+	FlowService_GetSnapshot_FullMethodName      = "/flow.v1.FlowService/GetSnapshot"
+	FlowService_ListEvents_FullMethodName       = "/flow.v1.FlowService/ListEvents"
+	FlowService_Search_FullMethodName           = "/flow.v1.FlowService/Search"
+	FlowService_Watch_FullMethodName            = "/flow.v1.FlowService/Watch"
+	FlowService_CreateNode_FullMethodName       = "/flow.v1.FlowService/CreateNode"
+	FlowService_UpdateNode_FullMethodName       = "/flow.v1.FlowService/UpdateNode"
+	FlowService_DeleteNode_FullMethodName       = "/flow.v1.FlowService/DeleteNode"
+	FlowService_SetStatus_FullMethodName        = "/flow.v1.FlowService/SetStatus"
+	FlowService_ReportCondition_FullMethodName  = "/flow.v1.FlowService/ReportCondition"
+	FlowService_SetVerdict_FullMethodName       = "/flow.v1.FlowService/SetVerdict"
+	FlowService_AddComment_FullMethodName       = "/flow.v1.FlowService/AddComment"
+	FlowService_AddDependency_FullMethodName    = "/flow.v1.FlowService/AddDependency"
+	FlowService_RemoveDependency_FullMethodName = "/flow.v1.FlowService/RemoveDependency"
+	FlowService_Undo_FullMethodName             = "/flow.v1.FlowService/Undo"
 )
 
 // FlowServiceClient is the client API for FlowService service.
@@ -620,7 +620,7 @@ func _FlowService_Undo_Handler(srv interface{}, ctx context.Context, dec func(in
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var FlowService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "fctrl.v1.FlowService",
+	ServiceName: "flow.v1.FlowService",
 	HandlerType: (*FlowServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -687,5 +687,5 @@ var FlowService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "fctrl/v1/fctrl.proto",
+	Metadata: "flow/v1/flow.proto",
 }

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package fctrl.v1;
+package flow.v1;
 
 // FlowControl core API.
 //

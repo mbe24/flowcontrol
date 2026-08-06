@@ -1,6 +1,6 @@
 # Protobuf
 
-`proto/fctrl/v1/fctrl.proto`.
+`proto/flow/v1/flow.proto`.
 
 Deliberate choices:
 
