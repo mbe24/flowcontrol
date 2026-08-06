@@ -12,6 +12,9 @@
   );
   const graph = $derived(layoutGraph(app.nodes, app.deps, expandedWps));
 
+  /** The canvas already scrolls, so mobile needs only a tighter toolbar. */
+  const mobile = $derived(app.width < 860);
+
   const stroke = (kind: string) =>
     kind === 'satisfied'
       ? 'var(--done)'
@@ -22,11 +25,12 @@
 
 <div class="toolbar">
   <span class="note">
-    {graph.clusters.length} expanded · {graph.boxes.length} collapsed · rollup edges
-    on
+    {graph.clusters.length} expanded · {graph.boxes.length} collapsed{mobile
+      ? ''
+      : ' · rollup edges on'}
   </span>
   <div class="spacer"></div>
-  <span class="note">Zoom</span>
+  {#if !mobile}<span class="note">Zoom</span>{/if}
   <div class="zoom">
     <button>−</button><span class="mono">100%</span><button>+</button>
   </div>
@@ -163,7 +167,7 @@
     {/each}
   </div>
 
-  <div class="legend">
+  <div class="legend" class:hide={mobile}>
     <span class="label">Edges</span>
     <span><i style:border-color="var(--blocked)"></i>hard dependency</span>
     <span
@@ -389,6 +393,7 @@
     overflow: hidden;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
   }
   .port {
@@ -447,5 +452,8 @@
   }
   .legend i.dash {
     border-top-style: dashed;
+  }
+  .legend.hide {
+    display: none;
   }
 </style>

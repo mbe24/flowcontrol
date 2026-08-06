@@ -8,14 +8,16 @@
   import LanesView from './components/LanesView.svelte';
   import GraphView from './components/GraphView.svelte';
   import DetailPanel from './components/DetailPanel.svelte';
+  import DetailSheet from './components/DetailSheet.svelte';
+  import OverrideDialog from './components/OverrideDialog.svelte';
   import Palette from './components/Palette.svelte';
 
   onMount(boot);
 
+  const mobile = $derived(app.width < 860);
+
   function onKeydown(e: KeyboardEvent) {
-    const typing =
-      e.target instanceof HTMLInputElement ||
-      e.target instanceof HTMLTextAreaElement;
+    const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
       app.paletteOpen = !app.paletteOpen;
@@ -23,23 +25,33 @@
       return;
     }
     if (e.key === 'Escape') {
-      app.paletteOpen = false;
+      if (app.confirmOverride) app.confirmOverride = null;
+      else if (app.paletteOpen) app.paletteOpen = false;
+      else if (app.sheet === 'full') app.sheet = 'peek';
       return;
     }
     if (typing) return;
     if (e.key === '1') app.view = 'table';
     if (e.key === '2') app.view = 'lanes';
     if (e.key === '3') app.view = 'graph';
+    /** Toggle the expanded detail panel. */
+    if (e.key === '\\' && app.selectedId && !mobile) {
+      app.panelMode = app.panelMode === 'peek' ? 'expanded' : 'peek';
+    }
   }
 </script>
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="shell">
-  <Rail />
+<div class="shell" class:mobile>
+  {#if !mobile}
+    <Rail />
+  {/if}
   <div class="main">
     <TopBar />
-    <FilterBar />
+    {#if !mobile}
+      <FilterBar />
+    {/if}
     <div class="body">
       <div class="views">
         {#if app.error}
@@ -54,14 +66,18 @@
           <GraphView />
         {/if}
       </div>
-      {#if app.selectedId}
+      {#if app.selectedId && !mobile}
         <DetailPanel />
       {/if}
     </div>
   </div>
+  {#if mobile}
+    <DetailSheet />
+  {/if}
   {#if app.paletteOpen}
     <Palette />
   {/if}
+  <OverrideDialog />
 </div>
 
 <style>
