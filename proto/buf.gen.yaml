@@ -14,11 +14,11 @@ plugins:
     out: ../fctrl/internal/pb
     opt: paths=source_relative
 
-  # Rust (fctrld)
+  # Rust (flowd)
   - remote: buf.build/community/neoeinstein-prost:v0.4.0
-    out: ../fctrld/src/generated
+    out: ../flowd/src/generated
   - remote: buf.build/community/neoeinstein-tonic:v0.4.0
-    out: ../fctrld/src/generated
+    out: ../flowd/src/generated
 
   # TypeScript (fctrl-web): single shared output under the web app.
   # fctrl-mcp can reference the same bindings once it exists.
