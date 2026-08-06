@@ -288,3 +288,23 @@ CREATE TRIGGER nodes_fts_update AFTER UPDATE ON nodes BEGIN
     INSERT INTO nodes_fts(rowid, id, title, description)
     VALUES (NEW.rowid, NEW.id, NEW.title, NEW.description);
 END;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- idempotency — write-retry ledger
+--
+-- WriteMeta carries an idempotency_key so an agent that retries a write (network
+-- timeout, process restart) records exactly one event. Every mutation first
+-- looks up (project_id, idempotency_key); if a row exists the request is a retry
+-- and the store returns the recorded seq instead of writing again.
+--
+-- Keys are scoped per project because `seq` is unique per database, not per
+-- project, and we want a retried `SetStatus` to return the same cursor.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE idempotency (
+    project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    idempotency_key TEXT NOT NULL,
+    seq             INTEGER NOT NULL,
+    created_at      INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (project_id, idempotency_key)
+) STRICT;

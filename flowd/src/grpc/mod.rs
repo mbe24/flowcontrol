@@ -1,8 +1,5 @@
-//! The tonic `FlowService` gRPC implementation.
-//!
-//! Read handlers are implemented in this iteration; writes and Watch return
-//! `UNIMPLEMENTED` and land in a later milestone. Backed by the `Store` seam,
-//! so the handlers are reusable against any future store.
+//! The tonic `FlowService` gRPC implementation. Backed by the `Store` seam, so
+//! the handlers are reusable against any future store.
 
 use crate::generated::flow_v1 as pb;
 use crate::generated::flow_v1::flow_service_server::FlowService;
@@ -26,7 +23,8 @@ impl FlowServiceServer {
 
 #[tonic::async_trait]
 impl FlowService for FlowServiceServer {
-    type WatchStream = tokio_stream::wrappers::ReceiverStream<Result<pb::WatchResponse, tonic::Status>>;
+    type WatchStream =
+        tokio_stream::wrappers::ReceiverStream<Result<pb::WatchResponse, tonic::Status>>;
 
     async fn list_projects(
         &self,
@@ -84,9 +82,108 @@ impl FlowService for FlowServiceServer {
 
     async fn watch(
         &self,
-        _request: tonic::Request<pb::WatchRequest>,
+        request: tonic::Request<pb::WatchRequest>,
     ) -> Result<tonic::Response<Self::WatchStream>, tonic::Status> {
-        Err(tonic::Status::unimplemented("watch not implemented yet"))
+        // A replay window larger than this is treated as a gap the client must
+        // recover from via GetSnapshot (a proxy for event-log retention).
+        const REPLAY_LIMIT: usize = 1000;
+        let req = request.into_inner();
+        let project_id = req.project_id;
+        let from_seq = req.from_seq;
+
+        let mut rx = self.store.subscribe();
+        let store = self.store.clone();
+        let (tx, rx_stream) =
+            tokio::sync::mpsc::channel::<Result<pb::WatchResponse, tonic::Status>>(16);
+
+        tokio::spawn(async move {
+            // Replay anything the client missed since its last seq.
+            if from_seq > 0 {
+                if let Ok(events) = store.events_after(&project_id, from_seq).await {
+                    // Contiguous log: ask for a resync only when the window is
+                    // unrealistic or the first event is not directly after the
+                    // requested cursor.
+                    let resync = (!events.is_empty() && events.len() > REPLAY_LIMIT)
+                        || events
+                            .first()
+                            .map(|e| e.seq != from_seq + 1)
+                            .unwrap_or(false);
+                    if !events.is_empty() {
+                        let seq = events.last().map(|e| e.seq).unwrap_or(from_seq);
+                        let _ = tx
+                            .send(Ok(pb::WatchResponse {
+                                events,
+                                changed_nodes: vec![],
+                                changed_progress: vec![],
+                                seq,
+                                resync_required: resync,
+                                heartbeat: false,
+                            }))
+                            .await;
+                    }
+                }
+            }
+            // Then stream live changes for this project, with a 30s heartbeat so
+            // a client can tell a quiet server from a dead one.
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if tx
+                            .send(Ok(pb::WatchResponse {
+                                events: vec![],
+                                changed_nodes: vec![],
+                                changed_progress: vec![],
+                                seq: 0,
+                                resync_required: false,
+                                heartbeat: true,
+                            }))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    n = rx.recv() => match n {
+                        Ok(m) if m.project_id == project_id => {
+                            if tx
+                                .send(Ok(pb::WatchResponse {
+                                    events: m.events,
+                                    changed_nodes: m.changed_nodes,
+                                    changed_progress: m.changed_progress,
+                                    seq: m.seq,
+                                    resync_required: false,
+                                    heartbeat: false,
+                                }))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Ok(_) => {} // other project; skip
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            let _ = tx
+                                .send(Ok(pb::WatchResponse {
+                                    events: vec![],
+                                    changed_nodes: vec![],
+                                    changed_progress: vec![],
+                                    seq: 0,
+                                    resync_required: true,
+                                    heartbeat: false,
+                                }))
+                                .await;
+                            break;
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+        });
+
+        Ok(tonic::Response::new(
+            tokio_stream::wrappers::ReceiverStream::new(rx_stream),
+        ))
     }
 
     async fn create_node(
@@ -95,7 +192,9 @@ impl FlowService for FlowServiceServer {
     ) -> Result<tonic::Response<pb::CreateNodeResponse>, tonic::Status> {
         let req = request.into_inner();
         let m = self.store.create_node(req).await.map_err(into_status)?;
-        Ok(tonic::Response::new(pb::CreateNodeResponse { mutation: Some(m) }))
+        Ok(tonic::Response::new(pb::CreateNodeResponse {
+            mutation: Some(m),
+        }))
     }
 
     async fn update_node(
@@ -104,7 +203,9 @@ impl FlowService for FlowServiceServer {
     ) -> Result<tonic::Response<pb::UpdateNodeResponse>, tonic::Status> {
         let req = request.into_inner();
         let m = self.store.update_node(req).await.map_err(into_status)?;
-        Ok(tonic::Response::new(pb::UpdateNodeResponse { mutation: Some(m) }))
+        Ok(tonic::Response::new(pb::UpdateNodeResponse {
+            mutation: Some(m),
+        }))
     }
 
     async fn delete_node(
@@ -113,7 +214,9 @@ impl FlowService for FlowServiceServer {
     ) -> Result<tonic::Response<pb::DeleteNodeResponse>, tonic::Status> {
         let req = request.into_inner();
         let m = self.store.delete_node(req).await.map_err(into_status)?;
-        Ok(tonic::Response::new(pb::DeleteNodeResponse { mutation: Some(m) }))
+        Ok(tonic::Response::new(pb::DeleteNodeResponse {
+            mutation: Some(m),
+        }))
     }
 
     async fn set_status(
@@ -122,28 +225,46 @@ impl FlowService for FlowServiceServer {
     ) -> Result<tonic::Response<pb::SetStatusResponse>, tonic::Status> {
         let req = request.into_inner();
         let m = self.store.set_status(req).await.map_err(into_status)?;
-        Ok(tonic::Response::new(pb::SetStatusResponse { mutation: Some(m) }))
+        Ok(tonic::Response::new(pb::SetStatusResponse {
+            mutation: Some(m),
+        }))
     }
 
     async fn report_condition(
         &self,
-        _request: tonic::Request<pb::ReportConditionRequest>,
+        request: tonic::Request<pb::ReportConditionRequest>,
     ) -> Result<tonic::Response<pb::ReportConditionResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented("report_condition not implemented yet"))
+        let req = request.into_inner();
+        let m = self
+            .store
+            .report_condition(req)
+            .await
+            .map_err(into_status)?;
+        Ok(tonic::Response::new(pb::ReportConditionResponse {
+            mutation: Some(m),
+        }))
     }
 
     async fn set_verdict(
         &self,
-        _request: tonic::Request<pb::SetVerdictRequest>,
+        request: tonic::Request<pb::SetVerdictRequest>,
     ) -> Result<tonic::Response<pb::SetVerdictResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented("set_verdict not implemented yet"))
+        let req = request.into_inner();
+        let m = self.store.set_verdict(req).await.map_err(into_status)?;
+        Ok(tonic::Response::new(pb::SetVerdictResponse {
+            mutation: Some(m),
+        }))
     }
 
     async fn add_comment(
         &self,
-        _request: tonic::Request<pb::AddCommentRequest>,
+        request: tonic::Request<pb::AddCommentRequest>,
     ) -> Result<tonic::Response<pb::AddCommentResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented("add_comment not implemented yet"))
+        let req = request.into_inner();
+        let m = self.store.add_comment(req).await.map_err(into_status)?;
+        Ok(tonic::Response::new(pb::AddCommentResponse {
+            mutation: Some(m),
+        }))
     }
 
     async fn add_dependency(
@@ -152,7 +273,9 @@ impl FlowService for FlowServiceServer {
     ) -> Result<tonic::Response<pb::AddDependencyResponse>, tonic::Status> {
         let req = request.into_inner();
         let m = self.store.add_dependency(req).await.map_err(into_status)?;
-        Ok(tonic::Response::new(pb::AddDependencyResponse { mutation: Some(m) }))
+        Ok(tonic::Response::new(pb::AddDependencyResponse {
+            mutation: Some(m),
+        }))
     }
 
     async fn remove_dependency(
@@ -160,14 +283,22 @@ impl FlowService for FlowServiceServer {
         request: tonic::Request<pb::RemoveDependencyRequest>,
     ) -> Result<tonic::Response<pb::RemoveDependencyResponse>, tonic::Status> {
         let req = request.into_inner();
-        let m = self.store.remove_dependency(req).await.map_err(into_status)?;
-        Ok(tonic::Response::new(pb::RemoveDependencyResponse { mutation: Some(m) }))
+        let m = self
+            .store
+            .remove_dependency(req)
+            .await
+            .map_err(into_status)?;
+        Ok(tonic::Response::new(pb::RemoveDependencyResponse {
+            mutation: Some(m),
+        }))
     }
 
     async fn undo(
         &self,
-        _request: tonic::Request<pb::UndoRequest>,
+        request: tonic::Request<pb::UndoRequest>,
     ) -> Result<tonic::Response<pb::UndoResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented("undo not implemented yet"))
+        let req = request.into_inner();
+        let m = self.store.undo(req).await.map_err(into_status)?;
+        Ok(tonic::Response::new(pb::UndoResponse { mutation: Some(m) }))
     }
 }

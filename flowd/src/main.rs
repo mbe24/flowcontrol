@@ -82,9 +82,12 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
 
     tonic::transport::Server::builder()
         .add_service(svc)
-        .serve_with_incoming_shutdown(tokio_stream::wrappers::TcpListenerStream::new(listener), async {
-            let _ = rx.await;
-        })
+        .serve_with_incoming_shutdown(
+            tokio_stream::wrappers::TcpListenerStream::new(listener),
+            async {
+                let _ = rx.await;
+            },
+        )
         .await?;
 
     info!("shutting down");

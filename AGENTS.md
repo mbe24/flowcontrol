@@ -11,7 +11,11 @@ Use Conventional Commits with a scope on the enclosing directory. Imperative moo
 - Scope: the component you touched, e.g. `flowcli`, `flowd`, `flowmcp`, `flowui`, `proto`, `plan`
 - Example: `chore(flowcli): add go.sum to fix first build`
 
-## DeepSeek: editing files (only in this harness)
+## DeepSeek
+
+Instructions for working in this, i.e. Codex, harness.
+
+### Editing files
 
 To safely edit text, hold the replacement in a double-quoted here-string (`@"..."@`) and swap it with exact `.Replace(old, new)` behind a `Contains` guard. Caveat: a literal dollar sign must be escaped by a preceding backtick.
 

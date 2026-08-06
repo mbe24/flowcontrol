@@ -28,7 +28,8 @@ pub async fn seed(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ('T-1043', 'prj-travel', 'WP-AUTH', 'TASK', 'Refresh-token rotation', 'Rotate on every refresh.', '', 'DONE', 200)")
         .execute(pool).await?;
     sqlx::query("INSERT INTO dependencies (blocker_id, blocked_id) VALUES ('T-1042', 'T-1043')")
-        .execute(pool).await?;
+        .execute(pool)
+        .await?;
 
     sqlx::query("INSERT INTO events (project_id, node_id, kind, author, summary, payload) VALUES
         ('prj-travel', 'T-1042', 'NODE_CREATED', 'seed', 'created T-1042', '{\"before\":null,\"after\":{}}')")
