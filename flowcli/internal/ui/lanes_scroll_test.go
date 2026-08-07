@@ -79,3 +79,42 @@ func TestLanesVerticalScroll(t *testing.T) {
 		t.Errorf("last selected card %s not visible in view:\n%s", sel, view)
 	}
 }
+
+// TestLanesScrollIndependently verifies that scrolling the active lane does
+// not scroll the other lanes: each lane keeps its own vertical window as the
+// active card moves. Previously all lanes shared one offset, so a non-active
+// lane with short content would scroll too far and show only blanks.
+func TestLanesScrollIndependently(t *testing.T) {
+	m := loadModel(t)
+	m.width, m.height = 100, 14
+	m.screen = ScreenLanes
+	m.lane = 0 // READY active
+	m.laneCursor[0] = 0
+
+	// capture what the BLOCKED lane shows before scrolling the active lane
+	before := visibleIDs(t, m)
+
+	// move the active (READY) lane to its last card
+	ready := m.laneTasks(store.Ready)
+	last := len(ready) - 1
+	for steps := 0; steps <= last; steps++ {
+		m = press(t, m, "j")
+	}
+	if m.laneCursor[0] != last {
+		t.Fatalf("active lane cursor did not reach last card: got %d", m.laneCursor[0])
+	}
+
+	// a non-active lane is BLOCKED (index 1 in the four-lane set). Its cursor
+	// is untouched, so its top card (T-1043 in the fixture) must still be
+	// visible: if lanes scrolled together, BLOCKED would have scrolled too.
+	blocked := m.laneTasks(store.Blocked)
+	if len(blocked) == 0 {
+		t.Skip("no BLOCKED cards in fixture")
+	}
+	topBlocked := m.ownerTask(blocked[0]).ID
+	after := visibleIDs(t, m)
+	if !after[topBlocked] {
+		t.Errorf("non-active BLOCKED lane scrolled with the active READY lane: %s no longer visible (before=%v after=%v)",
+			topBlocked, before, after)
+	}
+}

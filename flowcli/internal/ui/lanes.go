@@ -235,31 +235,11 @@ func (m Model) viewLanes(w, h int) string {
 	}
 	body = append(body, rr.String())
 
-	depth := 0
-	for _, c := range built {
-		if len(c) > depth {
-			depth = len(c)
-		}
-	}
-	grid := make([]string, 0, depth)
-	for r := 0; r < depth; r++ {
-		var line strings.Builder
-		for i := range lanes {
-			if i > 0 {
-				line.WriteString(strings.Repeat(" ", gutter))
-			}
-			var cl cardLine
-			if r < len(built[i]) {
-				cl = built[i][r]
-			}
-			line.WriteString(cell(cl.plain, cl.rendered, widths[i]))
-		}
-		grid = append(grid, line.String())
-	}
-
-	// Vertically scroll the lane grid so the active card stays visible.
-	// frame() reserves height-4 body rows: 2 go to the fixed header + rule,
-	// the rest belongs to the grid, so compute the grid viewport from that.
+	// Each lane scrolls independently: compute a per-lane vertical offset so
+	// that lane's active card (ID + title + work-package) stays fully visible,
+	// then render enough rows to fill the grid viewport, sampling each lane at
+	// its own offset. frame() reserves height-4 body rows, 2 of which go to
+	// the fixed header + rule above, so the grid gets the rest.
 	gridRoom := h - 6 // header(2) + frame padding(4)
 	if len(lanes) == 1 {
 		gridRoom-- // one-lane mode shows a dot row after the grid
@@ -268,42 +248,45 @@ func (m Model) viewLanes(w, h int) string {
 		gridRoom = 1
 	}
 
-	// find the grid row of the active card's first line
-	activeRow := 0
-	if len(lanes) > 0 && m.lane < len(lanes) {
-		tasks := m.laneTasks(lanes[m.lane])
-		cur := m.laneCursor[m.lane]
+	scrolls := make([]int, len(lanes))
+	for li := range lanes {
+		st := lanes[li]
+		laneW := widths[li]
+		tasks := m.laneTasks(st)
+		cur := m.laneCursor[li]
+		// top row of the active card within this lane's column
+		top := 0
+		for ti := 0; ti < cur && ti < len(tasks); ti++ {
+			top += len(m.laneCard(tasks[ti], laneW, false)) + 1
+		}
 		if cur < len(tasks) {
-			// compute offset: cards before the selected one take
-			// (header + titleLines + footer) rows plus one blank separator each.
-			for ti := 0; ti < cur; ti++ {
-				c := m.laneCard(tasks[ti], widths[m.lane], false)
-				activeRow += len(c) + 1
+			h := len(m.laneCard(tasks[cur], laneW, li == m.lane))
+			bottom := top + h
+			colH := len(built[li])
+			scrolls[li] = bottom - gridRoom
+			if scrolls[li] < 0 {
+				scrolls[li] = 0
+			}
+			if scrolls[li] > max(0, colH-gridRoom) {
+				scrolls[li] = max(0, colH-gridRoom)
 			}
 		}
 	}
 
-	// scroll so the active card is visible, keeping at least one row of it on
-	// screen, and never past the bottom of the grid.
-	scroll := 0
-	if activeRow > gridRoom-1 {
-		scroll = activeRow - (gridRoom - 1)
+	for r := 0; r < gridRoom; r++ {
+		var line strings.Builder
+		for i := range lanes {
+			if i > 0 {
+				line.WriteString(strings.Repeat(" ", gutter))
+			}
+			var cl cardLine
+			if idx := scrolls[i] + r; idx >= 0 && idx < len(built[i]) {
+				cl = built[i][idx]
+			}
+			line.WriteString(cell(cl.plain, cl.rendered, widths[i]))
+		}
+		body = append(body, line.String())
 	}
-	if scroll > max(0, depth-gridRoom) {
-		scroll = max(0, depth-gridRoom)
-	}
-	if scroll < 0 {
-		scroll = 0
-	}
-
-	vis := grid
-	if scroll < len(vis) {
-		vis = vis[scroll:]
-	}
-	if len(vis) > gridRoom {
-		vis = vis[:gridRoom]
-	}
-	body = append(body, vis...)
 
 	keys := key("h/l") + " lane  " + key("j/k") + " card  " + key("ret") + " detail  " +
 		key("s") + " status  " + key("1") + " tree  " + key("3") + " chain"
