@@ -1,4 +1,4 @@
-import type { FlowStore } from './store';
+import type { CreateNodeInput, FlowStore } from './store';
 import type {
   ActivityEntry,
   AgentResult,
@@ -211,6 +211,8 @@ export class MemoryStore implements FlowStore {
   private depList: Dependency[] = DEPS.map((d) => ({ ...d }));
   private activityList: ActivityEntry[] = ACTIVITY.map((a) => ({ ...a }));
   private seq = 100;
+  /** Ids this session created, in order; backs the fixture's undo. */
+  private createdStack: string[] = [];
 
   async projects(): Promise<Project[]> {
     await sleep(60);
@@ -258,6 +260,57 @@ export class MemoryStore implements FlowStore {
   async addComment(nodeId: string, text: string): Promise<void> {
     await sleep(40);
     this.push(nodeId, 'comment', text);
+  }
+
+  async createNode(input: CreateNodeInput): Promise<string> {
+    await sleep(40);
+    const node: FlowNode = {
+      id: `node-${this.seq++}`,
+      projectId: input.projectId,
+      parentId: input.parentId,
+      type: input.kind,
+      title: input.title,
+      description: input.description ? [input.description] : [],
+      status: 'READY',
+      condition: input.condition || undefined,
+      state: input.kind === 'WORK_PACKAGE' ? 'PLANNED' : undefined,
+      verification: NO_VERIFICATION
+    };
+    this.nodeList = [...this.nodeList, node];
+    this.createdStack.push(node.id);
+    this.push(node.id, 'edit', `created ${node.id}`);
+    return node.id;
+  }
+
+  async deleteNode(nodeId: string): Promise<void> {
+    await sleep(40);
+    this.nodeList = this.nodeList.filter((n) => n.id !== nodeId && n.parentId !== nodeId);
+    this.depList = this.depList.filter((d) => d.blockerId !== nodeId && d.blockedId !== nodeId);
+    this.push(nodeId, 'edit', `deleted ${nodeId}`);
+    this.createdStack = this.createdStack.filter((id) => id !== nodeId);
+  }
+
+  async addDependency(blockerId: string, blockedId: string): Promise<void> {
+    await sleep(40);
+    if (!this.depList.some((d) => d.blockerId === blockerId && d.blockedId === blockedId)) {
+      this.depList = [...this.depList, { blockerId, blockedId }];
+    }
+    this.push(blockedId, 'edit', `${blockerId} blocks ${blockedId}`);
+  }
+
+  async removeDependency(blockerId: string, blockedId: string): Promise<void> {
+    await sleep(40);
+    this.depList = this.depList.filter((d) => !(d.blockerId === blockerId && d.blockedId === blockedId));
+    this.push(blockedId, 'edit', `${blockerId} no longer blocks ${blockedId}`);
+  }
+
+  async undo(projectId: string): Promise<void> {
+    await sleep(40);
+    const id = this.createdStack.pop();
+    if (!id) return;
+    this.nodeList = this.nodeList.filter((n) => n.id !== id && n.parentId !== id);
+    this.depList = this.depList.filter((d) => d.blockerId !== id && d.blockedId !== id);
+    this.push(id, 'edit', `undid creation of ${id}`);
   }
 
   private push(nodeId: string, kind: ActivityEntry['kind'], text: string) {

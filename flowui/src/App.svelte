@@ -11,6 +11,7 @@
   import DetailSheet from './components/DetailSheet.svelte';
   import OverrideDialog from './components/OverrideDialog.svelte';
   import Palette from './components/Palette.svelte';
+  import NewTaskDialog from './components/NewTaskDialog.svelte';
 
   onMount(boot);
 
@@ -78,6 +79,7 @@
     <Palette />
   {/if}
   <OverrideDialog />
+  <NewTaskDialog />
 </div>
 
 <style>

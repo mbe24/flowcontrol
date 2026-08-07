@@ -157,7 +157,7 @@ describe('RemoteStore', () => {
   };
 
   function fakeClient(overrides: Record<string, unknown> = {}) {
-    const calls = { setStatus: [], setVerdict: [], addComment: [] } as Record<string, unknown[]>;
+    const calls = { setStatus: [], setVerdict: [], addComment: [], createNode: [], deleteNode: [], addDependency: [], removeDependency: [], undo: [] } as Record<string, unknown[]>;
     const client = {
       listProjects: vi.fn(async () => ({ projects: [{ id: 'p1', name: 'N', description: 'D', createdAt: 1n, archivedAt: 0n }] })),
       getSnapshot: vi.fn(async () => snap),
@@ -169,6 +169,22 @@ describe('RemoteStore', () => {
       }),
       addComment: vi.fn(async (req: unknown) => {
         calls.addComment.push(req);
+      }),
+      createNode: vi.fn(async (req: unknown) => {
+        calls.createNode.push(req);
+        return { mutation: { changedNodes: [{ id: 'node-new' }] } };
+      }),
+      deleteNode: vi.fn(async (req: unknown) => {
+        calls.deleteNode.push(req);
+      }),
+      addDependency: vi.fn(async (req: unknown) => {
+        calls.addDependency.push(req);
+      }),
+      removeDependency: vi.fn(async (req: unknown) => {
+        calls.removeDependency.push(req);
+      }),
+      undo: vi.fn(async (req: unknown) => {
+        calls.undo.push(req);
       })
     };
     return { client, calls, ...overrides };
@@ -215,5 +231,33 @@ describe('RemoteStore', () => {
     await storeFor(client).addComment('T-1042', 'hello');
     const req = (client.addComment as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(req.text).toBe('hello');
+  });
+
+  it('createNode maps kind/kind/parent and returns the created id', async () => {
+    const { client } = fakeClient();
+    const id = await storeFor(client).createNode({
+      projectId: 'prj-travel',
+      parentId: 'WP-A',
+      kind: 'TASK',
+      title: 'New'
+    });
+    expect(id).toBe('node-new');
+    const req = (client.createNode as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(req.kind).toBe(PbKind.TASK);
+    expect(req.parentId).toBe('WP-A');
+    expect(req.title).toBe('New');
+  });
+
+  it('deleteNode, addDependency/removeDependency and undo hit the right RPCs', async () => {
+    const { client } = fakeClient();
+    const store = storeFor(client);
+    await store.deleteNode('T-1042');
+    await store.addDependency('A', 'B');
+    await store.removeDependency('A', 'B');
+    await store.undo('prj-travel');
+    expect((client.deleteNode as ReturnType<typeof vi.fn>).mock.calls[0][0].nodeId).toBe('T-1042');
+    expect((client.addDependency as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({ blockerId: 'A', blockedId: 'B' });
+    expect((client.removeDependency as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({ blockerId: 'A', blockedId: 'B' });
+    expect((client.undo as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({ projectId: 'prj-travel', seq: 0n });
   });
 });

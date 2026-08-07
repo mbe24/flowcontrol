@@ -1,7 +1,7 @@
 import { create } from '@bufbuild/protobuf';
 import { createClient, type Client } from '@connectrpc/connect';
 import { createGrpcWebTransport } from '@connectrpc/connect-web';
-import type { FlowStore } from './store';
+import type { CreateNodeInput, FlowStore } from './store';
 import type {
   ActivityEntry,
   ActivityKind,
@@ -17,8 +17,11 @@ import type {
 } from './types';
 import {
   AddCommentRequestSchema,
+  AddDependencyRequestSchema,
   AgentResult as PbAgentResult,
+  CreateNodeRequestSchema,
   DeclaredStatus as PbDeclared,
+  DeleteNodeRequestSchema,
   EffectiveStatus as PbEffective,
   EventKind as PbEventKind,
   FlowService,
@@ -26,8 +29,10 @@ import {
   HumanVerdict as PbVerdict,
   ListProjectsRequestSchema,
   NodeKind as PbKind,
+  RemoveDependencyRequestSchema,
   SetStatusRequestSchema,
   SetVerdictRequestSchema,
+  UndoRequestSchema,
   WorkPackageState as PbWpState,
   type Dependency as PbDependency,
   type Event as PbEvent,
@@ -70,6 +75,17 @@ function kindOf(k: PbKind): NodeType {
       return 'TASK';
     default:
       return 'STEP';
+  }
+}
+
+function kindFor(k: NodeType): PbKind {
+  switch (k) {
+    case 'WORK_PACKAGE':
+      return PbKind.WORK_PACKAGE;
+    case 'TASK':
+      return PbKind.TASK;
+    default:
+      return PbKind.STEP;
   }
 }
 
@@ -210,7 +226,19 @@ export function toVerdict(verdict: HumanVerdict): PbVerdict {
 // ── the remote store ────────────────────────────────────────────────────────
 
 /** Just the RPCs RemoteStore uses, so tests can inject a fake. */
-type FlowServiceShim = Pick<Client<typeof FlowService>, 'listProjects' | 'getSnapshot' | 'setStatus' | 'setVerdict' | 'addComment'>;
+type FlowServiceShim = Pick<
+  Client<typeof FlowService>,
+  | 'listProjects'
+  | 'getSnapshot'
+  | 'setStatus'
+  | 'setVerdict'
+  | 'addComment'
+  | 'createNode'
+  | 'deleteNode'
+  | 'addDependency'
+  | 'removeDependency'
+  | 'undo'
+>;
 
 /**
  * FlowStore backed by the FlowControl core over grpc-web. Kept transport
@@ -281,6 +309,63 @@ export class RemoteStore implements FlowStore {
         meta: { author: AUTHOR, idempotencyKey: idemKey() },
         nodeId,
         text
+      })
+    );
+  }
+
+  async createNode(input: CreateNodeInput): Promise<string> {
+    const res = await this.client.createNode(
+      create(CreateNodeRequestSchema, {
+        meta: { author: AUTHOR, idempotencyKey: idemKey() },
+        projectId: input.projectId,
+        parentId: input.parentId ?? '',
+        kind: kindFor(input.kind),
+        title: input.title,
+        description: input.description ?? '',
+        condition: input.condition ?? '',
+        position: 0,
+        reference: ''
+      })
+    );
+    return res.mutation?.changedNodes[0]?.id ?? '';
+  }
+
+  async deleteNode(nodeId: string): Promise<void> {
+    await this.client.deleteNode(
+      create(DeleteNodeRequestSchema, {
+        meta: { author: AUTHOR, idempotencyKey: idemKey() },
+        nodeId,
+        failIfReferenced: false
+      })
+    );
+  }
+
+  async addDependency(blockerId: string, blockedId: string): Promise<void> {
+    await this.client.addDependency(
+      create(AddDependencyRequestSchema, {
+        meta: { author: AUTHOR, idempotencyKey: idemKey() },
+        blockerId,
+        blockedId
+      })
+    );
+  }
+
+  async removeDependency(blockerId: string, blockedId: string): Promise<void> {
+    await this.client.removeDependency(
+      create(RemoveDependencyRequestSchema, {
+        meta: { author: AUTHOR, idempotencyKey: idemKey() },
+        blockerId,
+        blockedId
+      })
+    );
+  }
+
+  async undo(projectId: string): Promise<void> {
+    await this.client.undo(
+      create(UndoRequestSchema, {
+        meta: { author: AUTHOR, idempotencyKey: idemKey() },
+        projectId,
+        seq: 0n
       })
     );
   }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, load, toggleTheme } from '../lib/state.svelte';
+  import { app, load, toggleTheme, openTaskDialog } from '../lib/state.svelte';
   import { projectCounts } from '../lib/derive';
   import type { ViewName } from '../lib/state.svelte';
 
@@ -50,7 +50,7 @@
       <span class="mono kbd">⌘K</span>
     </button>
     <button class="ghost">Filter</button>
-    <button class="primary">New task</button>
+    <button class="primary" onclick={openTaskDialog}>New task</button>
   {/if}
 </div>
 

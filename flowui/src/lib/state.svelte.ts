@@ -8,7 +8,12 @@ import type { ActivityEntry, Dependency, FlowNode, HumanVerdict, Project, Status
  * plain `vite dev`) talks to the running core. Binary switch so tree-shaking
  * keeps the fixture data out of the production bundle.
  */
-export const store: FlowStore = import.meta.env.VITE_DEMO ? new MemoryStore() : new RemoteStore();
+export let store: FlowStore = import.meta.env.VITE_DEMO ? new MemoryStore() : new RemoteStore();
+
+/** Swap the store (tests inject a mocked FlowStore). Overrides the env choice. */
+export function setStore(s: FlowStore) {
+  store = s;
+}
 
 export type ViewName = 'table' | 'lanes' | 'graph';
 /** Desktop: how much room the detail surface takes. Persisted. */
@@ -76,6 +81,9 @@ export const app = $state({
   /** Set when a human override would contradict an agent failure. */
   confirmOverride: null as string | null,
   draftComment: '',
+  /** "New task" dialog. */
+  taskDialog: false,
+  taskTitle: '',
   flash: ''
 });
 
@@ -133,24 +141,18 @@ async function refresh() {
   app.activity = activity;
 }
 
-let lastChange: { id: string; prev: Status } | null = null;
-
 export async function setStatus(id: string, status: Status) {
   const node = app.nodes.find((n) => n.id === id);
   if (!node || node.status === status) return;
-  lastChange = { id, prev: node.status };
   await store.setStatus(id, status);
   await refresh();
   app.flash = `${id} → ${status} · the engine owns the cascade`;
 }
 
 export async function undo() {
-  if (!lastChange) return;
-  const { id, prev } = lastChange;
-  lastChange = null;
-  await store.setStatus(id, prev);
+  await store.undo(app.projectId);
   await refresh();
-  app.flash = `undid ${id}`;
+  app.flash = 'undid last change';
 }
 
 /**
@@ -189,6 +191,32 @@ export async function submitComment(id: string) {
   app.draftComment = '';
   await store.addComment(id, text);
   await refresh();
+}
+
+export function openTaskDialog() {
+  app.taskTitle = '';
+  app.taskDialog = true;
+}
+
+export function closeTaskDialog() {
+  app.taskDialog = false;
+  app.taskTitle = '';
+}
+
+export async function createTask() {
+  const title = app.taskTitle.trim();
+  if (!title) return;
+  const wp = app.nodes.find((n) => n.type === 'WORK_PACKAGE');
+  await store.createNode({
+    projectId: app.projectId,
+    parentId: wp?.id ?? null,
+    kind: 'TASK',
+    title
+  });
+  app.taskDialog = false;
+  app.taskTitle = '';
+  await refresh();
+  app.flash = `created ${title}`;
 }
 
 export function toggleTheme() {

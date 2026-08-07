@@ -1,4 +1,15 @@
-import type { ActivityEntry, Dependency, FlowNode, HumanVerdict, Project, Status } from './types';
+import type { ActivityEntry, Dependency, FlowNode, HumanVerdict, NodeType, Project, Status } from './types';
+
+/** Input needed to create a node (a work package, task or step). */
+export interface CreateNodeInput {
+  projectId: string;
+  /** Parent id; empty for a work package. */
+  parentId: string | null;
+  kind: NodeType;
+  title: string;
+  description?: string;
+  condition?: string;
+}
 
 /**
  * The seam between the UI and the engine. MemoryStore implements it now; a
@@ -18,4 +29,14 @@ export interface FlowStore {
   /** Records the human's acceptance or rejection of a condition. */
   setVerdict(nodeId: string, verdict: HumanVerdict): Promise<void>;
   addComment(nodeId: string, text: string): Promise<void>;
+  /** Creates a node; returns its id. */
+  createNode(input: CreateNodeInput): Promise<string>;
+  /** Deletes a node and its subtree. */
+  deleteNode(nodeId: string): Promise<void>;
+  /** Adds a dependency edge. */
+  addDependency(blockerId: string, blockedId: string): Promise<void>;
+  /** Removes a dependency edge. */
+  removeDependency(blockerId: string, blockedId: string): Promise<void>;
+  /** Reverses the most recent event for a project (server-side undo). */
+  undo(projectId: string): Promise<void>;
 }
