@@ -76,12 +76,23 @@ func wrapTo(s string, w, maxLines int) []string {
 	return lines
 }
 
-// cell hard-truncates to w so no cell can ever push its neighbour.
+// cell hard-truncates to w display cells so no cell can ever push its
+// neighbour. `rendered` is the coloured version of `plain`.
 func cell(plain, rendered string, w int) string {
-	if len(plain) > w {
-		return plain[:w]
+	if wlen(plain) > w {
+		// hard-truncate the plain text to w cells, then trim a trailing partial
+		// glyph so we never emit an odd half-width.
+		r := []rune(stripANSI(plain))
+		s := ""
+		for _, c := range r {
+			if wlen(s+string(c)) > w {
+				break
+			}
+			s += string(c)
+		}
+		return s
 	}
-	return rendered + strings.Repeat(" ", w-len(plain))
+	return rendered + strings.Repeat(" ", w-wlen(plain))
 }
 
 func (m Model) viewLanes(w, h int) string {
@@ -113,7 +124,7 @@ func (m Model) viewLanes(w, h int) string {
 			}
 			head := mark + t.ID
 			tail := ratio + " " + b.Glyph
-			gap := laneW - len(head) - len(tail)
+			gap := laneW - wlen(head) - wlen(tail)
 			if gap < 1 {
 				gap = 1
 			}
@@ -141,7 +152,7 @@ func (m Model) viewLanes(w, h int) string {
 			// the ←blocker annotation is the first thing dropped when narrow
 			if laneW >= 30 && len(m.blockers[t.ID]) > 0 {
 				ann := " ←" + m.blockers[t.ID][0]
-				if len(foot)+len(ann) <= laneW {
+				if wlen(foot)+wlen(ann) <= laneW {
 					foot += ann
 					footR += styles.DimS.Render(ann)
 				}
@@ -175,7 +186,7 @@ func (m Model) viewLanes(w, h int) string {
 			rp.WriteString(strings.Repeat(" ", gutter))
 			rr.WriteString(strings.Repeat(" ", gutter))
 		}
-		rule := strings.Repeat("─", min(laneW-2, len(st)+4))
+		rule := strings.Repeat("─", min(laneW-2, wlen(string(st))+4))
 		rr.WriteString(cell(rule, styles.Status(st).Render(rule), laneW))
 	}
 	body = append(body, rr.String())
@@ -220,8 +231,16 @@ func (m Model) viewLanes(w, h int) string {
 }
 
 func padTrunc(s string, w int) string {
-	if len(s) > w {
-		return s[:w]
+	if wlen(s) > w {
+		// cell-accurate truncation
+		out := ""
+		for _, c := range []rune(stripANSI(s)) {
+			if wlen(out+string(c)) > w {
+				break
+			}
+			out += string(c)
+		}
+		return out
 	}
-	return s + strings.Repeat(" ", w-len(s))
+	return s + strings.Repeat(" ", w-wlen(s))
 }

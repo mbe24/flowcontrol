@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"flowcli/internal/store"
 	"flowcli/internal/styles"
@@ -12,11 +13,19 @@ import (
 
 func key(s string) string { return styles.AccentS.Render(s) }
 
+// wlen returns the display width (in terminal cells) of a string, counting
+// multibyte glyphs like box corners and check marks as a single cell. Go's
+// len() counts bytes, which misaligns the frame; this is the correct measure.
+// ANSI sequences (colour codes in rendered lines) are stripped first.
+func wlen(s string) int {
+	return runewidth.StringWidth(stripANSI(s))
+}
+
 func pad(s string, w int) string {
-	if len(s) >= w {
+	if wlen(s) >= w {
 		return s
 	}
-	return s + strings.Repeat(" ", w-len(s))
+	return s + strings.Repeat(" ", w-wlen(s))
 }
 
 // frame draws the terminal box: ┌─ title ─┐ … ├─┤ keys └─┘.
@@ -25,7 +34,7 @@ func frame(title string, body []string, keys string, inner, height int) string {
 	var b strings.Builder
 
 	head := "┌─ " + title + " "
-	dashes := inner + 2 - len(head) - 1
+	dashes := inner + 4 - wlen(head) - 1
 	if dashes < 0 {
 		dashes = 0
 	}
@@ -41,7 +50,7 @@ func frame(title string, body []string, keys string, inner, height int) string {
 	}
 	wall := styles.DimS.Render("│")
 	for _, line := range body {
-		visible := len([]rune(stripANSI(line)))
+		visible := wlen(line)
 		fill := inner - visible
 		if fill < 0 {
 			fill = 0
@@ -53,7 +62,7 @@ func frame(title string, body []string, keys string, inner, height int) string {
 	}
 
 	b.WriteString(styles.DimS.Render("├"+strings.Repeat("─", inner+2)+"┤") + "\n")
-	kv := len([]rune(stripANSI(keys)))
+	kv := wlen(keys)
 	kfill := inner - kv
 	if kfill < 0 {
 		kfill = 0
