@@ -510,22 +510,26 @@
     font-size: 11.5px;
   }
   .check {
-    width: 17px;
-    height: 17px;
+    width: 22px;
+    height: 22px;
     flex: none;
-    border-radius: 4px;
-    border: 1px solid var(--hue);
     background: transparent;
+    border: 0;
+    padding: 0;
     color: var(--hue);
-    font-size: 10px;
+    font-size: 17px;
+    line-height: 1;
     display: grid;
     place-items: center;
     cursor: pointer;
     font-family: inherit;
   }
+  .check:hover {
+    color: var(--fg);
+  }
   .check.ticked {
-    background: var(--hue);
-    color: var(--panel);
+    color: var(--hue);
+    font-weight: 700;
   }
   .rbody {
     display: flex;
