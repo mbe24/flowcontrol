@@ -1,7 +1,7 @@
 import { create } from '@bufbuild/protobuf';
 import { createClient, type Client } from '@connectrpc/connect';
 import { createGrpcWebTransport } from '@connectrpc/connect-web';
-import type { CreateNodeInput, FlowStore } from './store';
+import type { CreateNodeInput, FlowStore, UpdateNodeInput } from './store';
 import type {
   ActivityEntry,
   ActivityKind,
@@ -33,6 +33,7 @@ import {
   SetStatusRequestSchema,
   SetVerdictRequestSchema,
   UndoRequestSchema,
+  UpdateNodeRequestSchema,
   WorkPackageState as PbWpState,
   type Dependency as PbDependency,
   type Event as PbEvent,
@@ -234,6 +235,7 @@ type FlowServiceShim = Pick<
   | 'setVerdict'
   | 'addComment'
   | 'createNode'
+  | 'updateNode'
   | 'deleteNode'
   | 'addDependency'
   | 'removeDependency'
@@ -328,6 +330,32 @@ export class RemoteStore implements FlowStore {
       })
     );
     return res.mutation?.changedNodes[0]?.id ?? '';
+  }
+
+  async updateNode(nodeId: string, patch: UpdateNodeInput): Promise<void> {
+    const updateMask: string[] = [];
+    const body: Record<string, unknown> = {
+      meta: { author: AUTHOR, idempotencyKey: idemKey() },
+      nodeId
+    };
+    if (patch.title !== undefined) {
+      updateMask.push('title');
+      body.title = patch.title;
+    }
+    if (patch.description !== undefined) {
+      updateMask.push('description');
+      body.description = patch.description;
+    }
+    if (patch.condition !== undefined) {
+      updateMask.push('condition');
+      body.condition = patch.condition;
+    }
+    if (patch.reference !== undefined) {
+      updateMask.push('reference');
+      body.reference = patch.reference;
+    }
+    if (updateMask.length === 0) return;
+    await this.client.updateNode(create(UpdateNodeRequestSchema, { ...body, updateMask }));
   }
 
   async deleteNode(nodeId: string): Promise<void> {

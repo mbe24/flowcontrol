@@ -49,4 +49,11 @@ describe('MemoryStore writes', () => {
   it('setStatus on a missing node rejects', async () => {
     await expect(store.setStatus('nope', 'DONE')).rejects.toThrow(/not found/);
   });
+
+  it('updateNode changes the editable fields', async () => {
+    await store.updateNode('T-1042', { title: 'Renamed', condition: 'pnpm test' });
+    const [n] = (await store.nodes('prj-travel')).filter((x) => x.id === 'T-1042');
+    expect(n.title).toBe('Renamed');
+    expect(n.condition).toBe('pnpm test');
+  });
 });

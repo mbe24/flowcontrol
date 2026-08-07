@@ -1,6 +1,6 @@
 import { MemoryStore } from './memory';
 import { RemoteStore } from './remote';
-import type { FlowStore } from './store';
+import type { FlowStore, UpdateNodeInput } from './store';
 import type { ActivityEntry, Dependency, FlowNode, HumanVerdict, Project, Status } from './types';
 
 /**
@@ -217,6 +217,11 @@ export async function createTask() {
   app.taskTitle = '';
   await refresh();
   app.flash = `created ${title}`;
+}
+
+export async function updateNode(id: string, patch: UpdateNodeInput) {
+  await store.updateNode(id, patch);
+  await refresh();
 }
 
 export function toggleTheme() {

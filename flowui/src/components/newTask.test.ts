@@ -17,6 +17,7 @@ function mockStore() {
     setVerdict: vi.fn(async () => {}),
     addComment: vi.fn(async () => {}),
     createNode: vi.fn(async () => 'node-new'),
+    updateNode: vi.fn(async () => {}),
     deleteNode: vi.fn(async () => {}),
     addDependency: vi.fn(async () => {}),
     removeDependency: vi.fn(async () => {}),

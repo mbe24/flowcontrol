@@ -1,4 +1,4 @@
-import type { CreateNodeInput, FlowStore } from './store';
+import type { CreateNodeInput, FlowStore, UpdateNodeInput } from './store';
 import type {
   ActivityEntry,
   AgentResult,
@@ -288,6 +288,17 @@ export class MemoryStore implements FlowStore {
     this.depList = this.depList.filter((d) => d.blockerId !== nodeId && d.blockedId !== nodeId);
     this.push(nodeId, 'edit', `deleted ${nodeId}`);
     this.createdStack = this.createdStack.filter((id) => id !== nodeId);
+  }
+
+  async updateNode(nodeId: string, patch: UpdateNodeInput): Promise<void> {
+    await sleep(40);
+    const n = this.nodeList.find((x) => x.id === nodeId);
+    if (!n) throw new Error(`node not found: ${nodeId}`);
+    if (patch.title !== undefined) n.title = patch.title;
+    if (patch.description !== undefined) n.description = patch.description ? [patch.description] : [];
+    if (patch.condition !== undefined) n.condition = patch.condition;
+    if (patch.reference !== undefined) (n as { reference?: string }).reference = patch.reference;
+    this.push(nodeId, 'edit', `updated ${nodeId}`);
   }
 
   async addDependency(blockerId: string, blockedId: string): Promise<void> {

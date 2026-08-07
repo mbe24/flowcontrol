@@ -157,7 +157,7 @@ describe('RemoteStore', () => {
   };
 
   function fakeClient(overrides: Record<string, unknown> = {}) {
-    const calls = { setStatus: [], setVerdict: [], addComment: [], createNode: [], deleteNode: [], addDependency: [], removeDependency: [], undo: [] } as Record<string, unknown[]>;
+    const calls = { setStatus: [], setVerdict: [], addComment: [], createNode: [], updateNode: [], deleteNode: [], addDependency: [], removeDependency: [], undo: [] } as Record<string, unknown[]>;
     const client = {
       listProjects: vi.fn(async () => ({ projects: [{ id: 'p1', name: 'N', description: 'D', createdAt: 1n, archivedAt: 0n }] })),
       getSnapshot: vi.fn(async () => snap),
@@ -173,6 +173,9 @@ describe('RemoteStore', () => {
       createNode: vi.fn(async (req: unknown) => {
         calls.createNode.push(req);
         return { mutation: { changedNodes: [{ id: 'node-new' }] } };
+      }),
+      updateNode: vi.fn(async (req: unknown) => {
+        calls.updateNode.push(req);
       }),
       deleteNode: vi.fn(async (req: unknown) => {
         calls.deleteNode.push(req);
@@ -259,5 +262,22 @@ describe('RemoteStore', () => {
     expect((client.addDependency as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({ blockerId: 'A', blockedId: 'B' });
     expect((client.removeDependency as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({ blockerId: 'A', blockedId: 'B' });
     expect((client.undo as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({ projectId: 'prj-travel', seq: 0n });
+  });
+
+  it('updateNode sends an update mask for only the provided fields', async () => {
+    const { client } = fakeClient();
+    const store = storeFor(client);
+    await store.updateNode('T-1042', { title: 'Renamed', condition: 'pnpm test' });
+    const req = (client.updateNode as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(req.nodeId).toBe('T-1042');
+    expect(req.updateMask).toEqual(['title', 'condition']);
+    expect(req.title).toBe('Renamed');
+    expect(req.condition).toBe('pnpm test');
+  });
+
+  it('updateNode with no fields does not call the RPC', async () => {
+    const { client } = fakeClient();
+    await storeFor(client).updateNode('T-1042', {});
+    expect(client.updateNode).not.toHaveBeenCalled();
   });
 });

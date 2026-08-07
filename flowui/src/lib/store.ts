@@ -11,6 +11,14 @@ export interface CreateNodeInput {
   condition?: string;
 }
 
+/** Editable node fields. Only the fields provided are written (update mask). */
+export interface UpdateNodeInput {
+  title?: string;
+  description?: string;
+  condition?: string;
+  reference?: string;
+}
+
 /**
  * The seam between the UI and the engine. MemoryStore implements it now; a
  * client that talks to the Rust core over gRPC or a named pipe implements the
@@ -31,6 +39,8 @@ export interface FlowStore {
   addComment(nodeId: string, text: string): Promise<void>;
   /** Creates a node; returns its id. */
   createNode(input: CreateNodeInput): Promise<string>;
+  /** Updates editable fields of a node (only provided fields are written). */
+  updateNode(nodeId: string, patch: UpdateNodeInput): Promise<void>;
   /** Deletes a node and its subtree. */
   deleteNode(nodeId: string): Promise<void>;
   /** Adds a dependency edge. */
