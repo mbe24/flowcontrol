@@ -1,9 +1,14 @@
 import { MemoryStore } from './memory';
+import { RemoteStore } from './remote';
 import type { FlowStore } from './store';
 import type { ActivityEntry, Dependency, FlowNode, HumanVerdict, Project, Status } from './types';
 
-/** Swap this for a client that talks to the Rust core. */
-export const store: FlowStore = new MemoryStore();
+/**
+ * The seam: the demo build keeps the in-memory fixtures, the real build (or a
+ * plain `vite dev`) talks to the running core. Binary switch so tree-shaking
+ * keeps the fixture data out of the production bundle.
+ */
+export const store: FlowStore = import.meta.env.VITE_DEMO ? new MemoryStore() : new RemoteStore();
 
 export type ViewName = 'table' | 'lanes' | 'graph';
 /** Desktop: how much room the detail surface takes. Persisted. */
