@@ -120,13 +120,75 @@ func cell(plain, rendered string, w int) string {
 	return rendered + strings.Repeat(" ", w-wlen(plain))
 }
 
+// cardLine is one rendered row of a lane card: the plain (unstyled) text and
+// the styled version of the same content.
+type cardLine struct{ plain, rendered string }
+
+// laneCard builds the visible rows of a single lane card: the header line
+// (status mark + ID + step ratio + verdict glyph), the wrapped title lines,
+// and the work-package name footer. Empty wrapped lines are dropped so the
+// footer always sits directly under the last title line instead of leaving a
+// stray blank before it (previously any one-line title put a gap before the
+// work-package name).
+func (m Model) laneCard(t store.Node, laneW int, sel bool) []cardLine {
+	var col []cardLine
+	done, total := m.stepRatio(t.ID)
+	ratio := fmt.Sprintf("%d/%d", done, total)
+	b := t.Verification.Badge()
+
+	mark := " "
+	idStyle := styles.FgS
+	if sel {
+		mark = "▸"
+		idStyle = styles.AccentS
+	}
+	head := mark + t.ID
+	tail := ratio + " " + b.Glyph
+	gap := laneW - wlen(head) - wlen(tail)
+	if gap < 1 {
+		gap = 1
+	}
+	col = append(col, cardLine{
+		head + strings.Repeat(" ", gap) + tail,
+		styles.AccentS.Render(mark) + idStyle.Render(t.ID) + strings.Repeat(" ", gap) +
+			styles.DimS.Render(ratio) + " " + styles.Status(b.Kind).Render(b.Glyph),
+	})
+
+	titleStyle := styles.FgS
+	if sel {
+		titleStyle = styles.BrightS
+	}
+	for _, l := range wrapTo(t.Title, laneW-1, 2) {
+		if l == "" {
+			continue
+		}
+		col = append(col, cardLine{" " + l, " " + titleStyle.Render(l)})
+	}
+
+	pkg := ""
+	if p, ok := m.byID[t.ParentID]; ok {
+		pkg = p.Title
+	}
+	hue := styles.Hues[m.hueOf(t.ParentID)%len(styles.Hues)]
+	foot := " " + pkg
+	footR := " " + lipgloss.NewStyle().Foreground(hue).Render(pkg)
+	// the ←blocker annotation is the first thing dropped when narrow
+	if laneW >= 30 && len(m.blockers[t.ID]) > 0 {
+		ann := " ←" + m.blockers[t.ID][0]
+		if wlen(foot)+wlen(ann) <= laneW {
+			foot += ann
+			footR += styles.DimS.Render(ann)
+		}
+	}
+	return append(col, cardLine{foot, footR})
+}
+
 func (m Model) viewLanes(w, h int) string {
 	lanes := m.laneSet()
 	gutter := m.laneGutter()
 	inner := w - 4
 	widths := m.laneWidths(lanes, gutter, inner)
 
-	type cardLine struct{ plain, rendered string }
 	built := make([][]cardLine, len(lanes))
 
 	for li, st := range lanes {
@@ -139,52 +201,7 @@ func (m Model) viewLanes(w, h int) string {
 				col = append(col, cardLine{"", ""})
 			}
 			sel := li == m.lane && ti == cur
-			done, total := m.stepRatio(t.ID)
-			ratio := fmt.Sprintf("%d/%d", done, total)
-			b := t.Verification.Badge()
-
-			mark := " "
-			idStyle := styles.FgS
-			if sel {
-				mark = "▸"
-				idStyle = styles.AccentS
-			}
-			head := mark + t.ID
-			tail := ratio + " " + b.Glyph
-			gap := laneW - wlen(head) - wlen(tail)
-			if gap < 1 {
-				gap = 1
-			}
-			col = append(col, cardLine{
-				head + strings.Repeat(" ", gap) + tail,
-				styles.AccentS.Render(mark) + idStyle.Render(t.ID) + strings.Repeat(" ", gap) +
-					styles.DimS.Render(ratio) + " " + styles.Status(b.Kind).Render(b.Glyph),
-			})
-
-			titleStyle := styles.FgS
-			if sel {
-				titleStyle = styles.BrightS
-			}
-			for _, l := range wrapTo(t.Title, laneW-1, 2) {
-				col = append(col, cardLine{" " + l, " " + titleStyle.Render(l)})
-			}
-
-			pkg := ""
-			if p, ok := m.byID[t.ParentID]; ok {
-				pkg = p.Title
-			}
-			hue := styles.Hues[m.hueOf(t.ParentID)%len(styles.Hues)]
-			foot := " " + pkg
-			footR := " " + lipgloss.NewStyle().Foreground(hue).Render(pkg)
-			// the ←blocker annotation is the first thing dropped when narrow
-			if laneW >= 30 && len(m.blockers[t.ID]) > 0 {
-				ann := " ←" + m.blockers[t.ID][0]
-				if wlen(foot)+wlen(ann) <= laneW {
-					foot += ann
-					footR += styles.DimS.Render(ann)
-				}
-			}
-			col = append(col, cardLine{foot, footR})
+			col = append(col, m.laneCard(t, laneW, sel)...)
 		}
 		col = append(col, cardLine{"", ""})
 		more := fmt.Sprintf(" +%d more", max(0, len(tasks)-3))
