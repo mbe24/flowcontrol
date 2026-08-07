@@ -159,6 +159,42 @@ func (g *GRPC) AddComment(ctx context.Context, nodeID, text string) error {
 	return err
 }
 
+func (g *GRPC) CreateProject(_ context.Context, name, description string) (string, error) {
+	return "", fmt.Errorf("CreateProject: flowd proto has no CreateProject RPC yet")
+}
+
+func (g *GRPC) CreateNode(ctx context.Context, n NewNode) (string, error) {
+	res, err := g.c.CreateNode(ctx, &flowv1.CreateNodeRequest{
+		Meta:        &flowv1.WriteMeta{Author: g.who},
+		ProjectId:   n.ProjectID,
+		ParentId:    n.ParentID,
+		Kind:        toNodeKind(n.Type),
+		Title:       n.Title,
+		Description: strings.Join(n.Description, "\n"),
+		Condition:   n.Condition,
+	})
+	if err != nil {
+		return "", err
+	}
+	g.invalidate()
+	// The created node's id comes back in the mutation's changed set.
+	if res != nil && len(res.Mutation.GetChangedNodes()) > 0 {
+		return res.Mutation.GetChangedNodes()[0].Id, nil
+	}
+	return "", nil
+}
+
+func toNodeKind(t NodeType) flowv1.NodeKind {
+	switch t {
+	case WorkPackage:
+		return flowv1.NodeKind_NODE_KIND_WORK_PACKAGE
+	case Task:
+		return flowv1.NodeKind_NODE_KIND_TASK
+	default:
+		return flowv1.NodeKind_NODE_KIND_STEP
+	}
+}
+
 // ─── mapping ────────────────────────────────────────────────────────────────
 
 func fromProtoNode(n *flowv1.Node) Node {

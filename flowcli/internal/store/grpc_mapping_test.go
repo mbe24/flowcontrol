@@ -196,3 +196,39 @@ func TestGRPCReadsSnapshot(t *testing.T) {
 	assert.Equal(t, "T-1041", deps[0].BlockerID)
 	mc.AssertExpectations(t)
 }
+
+func TestGRPCCreateNodeRPC(t *testing.T) {
+	mc := new(mockClient)
+	g := NewGRPCWithClient(mc, "mbe")
+
+	res := &flowv1.CreateNodeResponse{
+		Mutation: &flowv1.Mutation{ChangedNodes: []*flowv1.Node{{Id: "T-3000"}}},
+	}
+	mc.On("CreateNode", mock.Anything, mock.MatchedBy(func(req *flowv1.CreateNodeRequest) bool {
+		return req.ProjectId == "prj-travel" &&
+			req.ParentId == "T-1042" &&
+			req.Kind == flowv1.NodeKind_NODE_KIND_STEP &&
+			req.Title == "write the test" &&
+			req.Condition == "go test" &&
+			req.Meta != nil && req.Meta.Author == "mbe"
+	})).Return(res, nil).Once()
+
+	id, err := g.CreateNode(context.Background(), NewNode{
+		ProjectID: "prj-travel",
+		ParentID:  "T-1042",
+		Type:      Step,
+		Title:     "write the test",
+		Condition: "go test",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "T-3000", id)
+	mc.AssertExpectations(t)
+}
+
+func TestGRPCCreateProjectUnsupported(t *testing.T) {
+	mc := new(mockClient)
+	g := NewGRPCWithClient(mc, "mbe")
+
+	_, err := g.CreateProject(context.Background(), "New App", "desc")
+	require.Error(t, err)
+}

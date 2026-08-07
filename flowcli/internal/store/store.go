@@ -69,6 +69,20 @@ type Project struct {
 	ID          string
 	Name        string
 	Description string
+	// Archived hides the project from the landing picker. Deleted projects are
+	// not modelled yet — archiving is the reversible form of removal.
+	Archived bool
+}
+
+// NewNode is the client-side payload for CreateNode. Condition is only used by
+// Task and Step; Description only by WorkPackage and Task.
+type NewNode struct {
+	ProjectID   string
+	ParentID    string
+	Type        NodeType
+	Title       string
+	Description []string
+	Condition   string
 }
 
 type Node struct {
@@ -124,6 +138,13 @@ type Store interface {
 	// SetVerdict records the operator's acceptance of a reported condition.
 	SetVerdict(ctx context.Context, nodeID string, verdict HumanVerdict) error
 	AddComment(ctx context.Context, nodeID, text string) error
+
+	// CreateProject adds a project and returns its id. The memory store
+	// assigns ids; the gRPC path will round-trip through the engine once the
+	// proto gains CreateProject.
+	CreateProject(ctx context.Context, name, description string) (string, error)
+	// CreateNode adds a child node and returns its id.
+	CreateNode(ctx context.Context, n NewNode) (string, error)
 }
 
 // Badge resolves an agent report and a human verdict into one display state.

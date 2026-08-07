@@ -38,9 +38,9 @@ func NewMemory() *Memory {
 
 	m := &Memory{
 		projects: []Project{
-			{"prj-travel", "Travel Webapp", "Booking flow, auth and payments."},
-			{"prj-beer", "Beer App", "Tasting notes and cellar tracking."},
-			{"prj-docs", "Developer Docs", "Public API reference."},
+			{ID: "prj-travel", Name: "Travel Webapp", Description: "Booking flow, auth and payments."},
+			{ID: "prj-beer", Name: "Beer App", Description: "Tasting notes and cellar tracking."},
+			{ID: "prj-docs", Name: "Developer Docs", Description: "Public API reference."},
 		},
 		nodes: []Node{
 			wp("WP-AUTH", "Authentication Infrastructure", Active),
@@ -281,6 +281,37 @@ func (m *Memory) AddComment(_ context.Context, nodeID, text string) error {
 	defer m.mu.Unlock()
 	m.push(nodeID, ActComment, text)
 	return nil
+}
+
+func (m *Memory) CreateProject(_ context.Context, name, description string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.seq++
+	id := fmt.Sprintf("prj-%d", m.seq)
+	m.projects = append(m.projects, Project{ID: id, Name: name, Description: description})
+	return id, nil
+}
+
+func (m *Memory) CreateNode(_ context.Context, n NewNode) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.seq++
+	id := fmt.Sprintf("%s.%d", n.ParentID, m.seq)
+	// Work packages are identified by a WP- prefix rather than a task-style id.
+	if n.Type == WorkPackage {
+		id = fmt.Sprintf("WP-%d", m.seq)
+	}
+	m.nodes = append(m.nodes, Node{
+		ID:          id,
+		ProjectID:   n.ProjectID,
+		ParentID:    n.ParentID,
+		Type:        n.Type,
+		Title:       n.Title,
+		Description: n.Description,
+		Status:      Ready,
+		Condition:   n.Condition,
+	})
+	return id, nil
 }
 
 // push prepends an activity entry. Caller holds the lock.
