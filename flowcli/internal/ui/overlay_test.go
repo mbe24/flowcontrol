@@ -25,7 +25,7 @@ func TestOverlayCenteredAndBackgroundPreserved(t *testing.T) {
 	// locate the dialog's top border row
 	dlgTop := -1
 	for i, l := range lines {
-		if strings.Contains(stripANSI(l), "┌─ set status") {
+		if strings.Contains(stripANSI(l), "╭─ set status") {
 			dlgTop = i
 			break
 		}

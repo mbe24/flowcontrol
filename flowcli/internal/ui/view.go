@@ -62,12 +62,12 @@ func treeRow(prefix, titlePlain, titleStyled, right string, inner int) string {
 func frame(title string, body []string, keys string, inner, height int) string {
 	var b strings.Builder
 
-	head := "┌─ " + title + " "
+	head := "╭─ " + title + " "
 	dashes := inner + 4 - wlen(head) - 1
 	if dashes < 0 {
 		dashes = 0
 	}
-	b.WriteString(styles.AccentS.Render(head+strings.Repeat("─", dashes)+"┐") + "\n")
+	b.WriteString(styles.AccentS.Render(head+strings.Repeat("─", dashes)+"╮") + "\n")
 
 	// leave room for header, separator, key line and footer
 	room := height - 4
@@ -97,7 +97,7 @@ func frame(title string, body []string, keys string, inner, height int) string {
 		kfill = 0
 	}
 	b.WriteString(wall + " " + keys + strings.Repeat(" ", kfill) + " " + wall + "\n")
-	b.WriteString(styles.AccentS.Render("└" + strings.Repeat("─", inner+2) + "┘"))
+	b.WriteString(styles.AccentS.Render("╰" + strings.Repeat("─", inner+2) + "╯"))
 	return b.String()
 }
 
