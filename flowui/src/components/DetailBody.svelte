@@ -333,6 +333,8 @@
     gap: 9px;
   }
   .title h1 {
+    flex: 1;
+    min-width: 0;
     margin: 0;
     font-size: 15px;
     font-weight: 600;
