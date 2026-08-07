@@ -27,6 +27,7 @@ export interface Project {
   name: string;
   description: string;
   createdAt: number;
+  archived?: boolean;
 }
 
 export interface FlowNode {

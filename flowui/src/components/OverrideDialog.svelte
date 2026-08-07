@@ -5,18 +5,8 @@
 </script>
 
 {#if node}
-  <div
-    class="scrim"
-    role="presentation"
-    onclick={() => (app.confirmOverride = null)}
-  >
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <div
-      class="dialog"
-      role="alertdialog"
-      tabindex="-1"
-      onclick={(e) => e.stopPropagation()}
-    >
+  <div class="scrim" role="presentation" onclick={() => (app.confirmOverride = null)}>
+    <div class="dialog" role="alertdialog" tabindex="-1" onclick={(e) => e.stopPropagation()}>
       <div class="head">
         <span class="mark">✕</span>
         <span class="h">The agent reported a failure</span>
@@ -24,13 +14,11 @@
       <p>
         {node.verification?.agentName || 'The agent'} ran
         <span class="mono">{node.condition}</span>
-        {node.verification?.agentWhen} and it failed. Marking this verified records
-        your acceptance over that result.
+        {node.verification?.agentWhen} and it failed. Marking this verified records your
+        acceptance over that result.
       </p>
       <div class="actions">
-        <button class="ghost" onclick={() => (app.confirmOverride = null)}
-          >Cancel</button
-        >
+        <button class="ghost" onclick={() => (app.confirmOverride = null)}>Cancel</button>
         <button class="primary" onclick={confirmOverride}>Accept anyway</button>
       </div>
     </div>

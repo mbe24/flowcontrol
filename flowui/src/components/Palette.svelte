@@ -1,24 +1,60 @@
 <script lang="ts">
-  import { app, select, setStatus } from '../lib/state.svelte';
+  import { app, createNode, select, setStatus } from '../lib/state.svelte';
   import { buildIndex } from '../lib/derive';
   import { ALL_STATUSES, stepGlyph } from '../lib/types';
   import type { Status } from '../lib/types';
 
   const index = $derived(buildIndex(app.nodes, app.deps));
 
-  type Hit = {
-    kind: 'task' | 'step' | 'cmd';
-    id: string;
-    title: string;
-    hint: string;
-    status?: Status;
-    run: () => void;
-  };
+  type Hit = { kind: 'task' | 'step' | 'cmd'; id: string; title: string; hint: string; status?: Status; run: () => void | Promise<void> };
 
   const results = $derived.by((): Hit[] => {
     const q = app.paletteQuery.trim().toLowerCase();
     if (!q) return [];
     const hits: Hit[] = [];
+
+    // "new task …" / "new step …" / "new package …" / "new project …".
+    // Search still comes first: create rows only appear for a "new" prefix.
+    const verb = q.match(/^new\s+(task|step|package|work package|project)\s*(.*)$/);
+    if (verb) {
+      const what = verb[1];
+      const title = app.paletteQuery.trim().slice(app.paletteQuery.trim().toLowerCase().indexOf(verb[2] || '~')).trim();
+      const sel = app.nodes.find((n) => n.id === app.selectedId);
+      if (what === 'project') {
+        hits.push({
+          kind: 'cmd', id: '', title: 'Create project…', hint: 'opens the dialog',
+          run: () => { app.paletteOpen = false; app.dialog = { kind: 'newProject' }; }
+        });
+      } else {
+        const type = what === 'step' ? 'STEP' : what === 'task' ? 'TASK' : 'WORK_PACKAGE';
+        const parent =
+          type === 'WORK_PACKAGE' ? null
+          : type === 'STEP' ? (sel?.type === 'STEP' ? sel.parentId : sel?.id ?? null)
+          : (sel?.type === 'WORK_PACKAGE' ? sel.id : sel?.parentId ?? null);
+        const parentName = parent ? index.byId.get(parent)?.title ?? parent : '';
+        if (title) {
+          hits.push({
+            kind: 'cmd', id: '',
+            title: `Create ${what} “${title}”`,
+            hint: parent ? `under ${parent}` : 'in this project',
+            run: async () => {
+              app.paletteOpen = false;
+              if (type !== 'WORK_PACKAGE' && !parent) return;
+              await createNode({ projectId: app.projectId, parentId: parent, type, title }, true);
+            }
+          });
+        }
+        hits.push({
+          kind: 'cmd', id: '',
+          title: title ? `Create ${what}, pick a different parent…` : `Create a ${what}…`,
+          hint: parentName ? `now: ${parentName}` : 'full form',
+          run: () => {
+            app.paletteOpen = false;
+            app.dialog = { kind: 'create', nodeType: type, parentId: parent, title };
+          }
+        });
+      }
+    }
     for (const n of app.nodes) {
       if (n.type === 'WORK_PACKAGE') continue;
       if (!n.title.toLowerCase().includes(q)) continue;
@@ -30,9 +66,9 @@
         hint: parent?.title ?? '',
         status: n.status,
         run: () => {
-          select(n.type === 'STEP' ? (n.parentId ?? n.id) : n.id);
+          select(n.type === 'STEP' ? n.parentId ?? n.id : n.id);
           app.paletteOpen = false;
-        },
+        }
       });
       if (hits.length >= 8) break;
     }
@@ -47,7 +83,7 @@
           run: () => {
             if (app.selectedId) setStatus(app.selectedId, s);
             app.paletteOpen = false;
-          },
+          }
         });
       }
     }
@@ -69,25 +105,11 @@
   }
 
   const glyph = (h: Hit) =>
-    h.kind === 'cmd'
-      ? '⌘'
-      : h.kind === 'step'
-        ? stepGlyph(h.status ?? 'READY')
-        : '●';
+    h.kind === 'cmd' ? '⌘' : h.kind === 'step' ? stepGlyph(h.status ?? 'READY') : '●';
 </script>
 
-<div
-  class="scrim"
-  onclick={() => (app.paletteOpen = false)}
-  role="presentation"
->
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div
-    class="palette"
-    onclick={(e) => e.stopPropagation()}
-    role="dialog"
-    tabindex="-1"
-  >
+<div class="scrim" onclick={() => (app.paletteOpen = false)} role="presentation">
+  <div class="palette" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
     <div class="input">
       <span class="mono caret">›</span>
       <!-- svelte-ignore a11y_autofocus -->
@@ -96,18 +118,12 @@
         bind:value={app.paletteQuery}
         onkeydown={onKeydown}
         placeholder="task, step or command"
-        autofocus
-      />
+        autofocus />
       <span class="mono count">{results.length} results</span>
     </div>
     <div class="list">
       {#each results as h, i (h.kind + h.id + h.title)}
-        <button
-          class="hit"
-          class:on={i === cursor}
-          onmouseenter={() => (cursor = i)}
-          onclick={h.run}
-        >
+        <button class="hit" class:on={i === cursor} onmouseenter={() => (cursor = i)} onclick={h.run}>
           <span class="mono kind">{glyph(h)}</span>
           <span class="mono id">{h.id}</span>
           <span class="ellipsis title">{h.title}</span>
@@ -115,15 +131,11 @@
         </button>
       {/each}
       {#if results.length === 0}
-        <div class="empty">
-          Search tasks, steps and commands — try “rotate”.
-        </div>
+        <div class="empty">Search tasks, steps and commands — try “rotate”.</div>
       {/if}
     </div>
     <div class="foot mono">
-      <span>↵ open</span><span>⌘↵ set status</span><span
-        >⇥ filter by package</span
-      >
+      <span>↵ open</span><span>⌘↵ set status</span><span>⇥ filter by package</span>
       <span class="spacer"></span><span>esc close</span>
     </div>
   </div>

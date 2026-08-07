@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { app, boot } from './lib/state.svelte';
+  import { app, boot, closeOverlays } from './lib/state.svelte';
   import Rail from './components/Rail.svelte';
   import TopBar from './components/TopBar.svelte';
   import FilterBar from './components/FilterBar.svelte';
@@ -10,15 +10,26 @@
   import DetailPanel from './components/DetailPanel.svelte';
   import DetailSheet from './components/DetailSheet.svelte';
   import OverrideDialog from './components/OverrideDialog.svelte';
+  import CreateNodeDialog from './components/CreateNodeDialog.svelte';
+  import DeleteDialog from './components/DeleteDialog.svelte';
+  import MoveDialog from './components/MoveDialog.svelte';
+  import ProjectDialog from './components/ProjectDialog.svelte';
+  import ProjectSwitcher from './components/ProjectSwitcher.svelte';
+  import FilterPopover from './components/FilterPopover.svelte';
+  import NodeMenu from './components/NodeMenu.svelte';
   import Palette from './components/Palette.svelte';
-  import NewTaskDialog from './components/NewTaskDialog.svelte';
 
   onMount(boot);
 
   const mobile = $derived(app.width < 860);
+  const menuNode = $derived(app.nodes.find((n) => n.id === app.nodeMenuFor));
 
   function onKeydown(e: KeyboardEvent) {
-    const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+    const typing =
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLTextAreaElement ||
+      e.target instanceof HTMLSelectElement;
+
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
       app.paletteOpen = !app.paletteOpen;
@@ -26,16 +37,29 @@
       return;
     }
     if (e.key === 'Escape') {
-      if (app.confirmOverride) app.confirmOverride = null;
+      if (app.dialog) app.dialog = null;
+      else if (app.confirmOverride) app.confirmOverride = null;
+      else if (app.nodeMenuFor) app.nodeMenuFor = null;
+      else if (app.filterOpen) app.filterOpen = false;
+      else if (app.projectMenuOpen) app.projectMenuOpen = false;
       else if (app.paletteOpen) app.paletteOpen = false;
       else if (app.sheet === 'full') app.sheet = 'peek';
       return;
     }
-    if (typing) return;
+    if (typing || app.dialog) return;
+
     if (e.key === '1') app.view = 'table';
     if (e.key === '2') app.view = 'lanes';
     if (e.key === '3') app.view = 'graph';
-    /** Toggle the expanded detail panel. */
+    if (e.key === 'f' && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      app.filterOpen = !app.filterOpen;
+    }
+    if (e.key === 'n' && app.selectedId) {
+      e.preventDefault();
+      const sel = app.nodes.find((n) => n.id === app.selectedId);
+      if (sel) app.dialog = { kind: 'create', nodeType: 'STEP', parentId: sel.id, title: '' };
+    }
     if (e.key === '\\' && app.selectedId && !mobile) {
       app.panelMode = app.panelMode === 'peek' ? 'expanded' : 'peek';
     }
@@ -72,14 +96,40 @@
       {/if}
     </div>
   </div>
+
   {#if mobile}
     <DetailSheet />
+  {/if}
+
+  {#if app.projectMenuOpen}
+    <ProjectSwitcher />
+  {/if}
+  {#if app.filterOpen}
+    <FilterPopover />
+  {/if}
+  {#if app.nodeMenuFor && menuNode}
+    <NodeMenu node={menuNode} x={app.menuAt.x} y={app.menuAt.y} onclose={() => (app.nodeMenuFor = null)} />
   {/if}
   {#if app.paletteOpen}
     <Palette />
   {/if}
+
+  {#if app.dialog?.kind === 'create'}
+    <CreateNodeDialog
+      nodeType={app.dialog.nodeType}
+      parentId={app.dialog.parentId}
+      initialTitle={app.dialog.title} />
+  {:else if app.dialog?.kind === 'delete'}
+    <DeleteDialog nodeId={app.dialog.nodeId} />
+  {:else if app.dialog?.kind === 'move'}
+    <MoveDialog nodeId={app.dialog.nodeId} to={app.dialog.to} />
+  {:else if app.dialog?.kind === 'newProject'}
+    <ProjectDialog />
+  {:else if app.dialog?.kind === 'editProject'}
+    <ProjectDialog projectId={app.dialog.projectId} />
+  {/if}
+
   <OverrideDialog />
-  <NewTaskDialog />
 </div>
 
 <style>

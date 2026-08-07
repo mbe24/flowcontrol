@@ -90,6 +90,37 @@ export function hueOf(nodes: FlowNode[], wpId: string): string {
   return HUES[(i < 0 ? 0 : i) % HUES.length];
 }
 
+/** Would adding blocker → blocked close a cycle? */
+export function wouldCycle(index: Index, blockerId: string, blockedId: string): boolean {
+  if (blockerId === blockedId) return true;
+  const seen = new Set<string>();
+  const stack = [blockedId];
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (id === blockerId) return true;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const next of index.blocks.get(id) ?? []) stack.push(next);
+  }
+  return false;
+}
+
+/** Every node under `id`, not including it. */
+export function descendantsOf(nodes: FlowNode[], id: string): FlowNode[] {
+  const out: FlowNode[] = [];
+  const stack = [id];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    for (const n of nodes) {
+      if (n.parentId === cur) {
+        out.push(n);
+        stack.push(n.id);
+      }
+    }
+  }
+  return out;
+}
+
 /** The task (or work package) a status change should apply to. */
 export function ownerTask(index: Index, node: FlowNode): FlowNode {
   if (node.type === 'STEP' && node.parentId) {

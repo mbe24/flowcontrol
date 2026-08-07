@@ -1,16 +1,19 @@
 import { MemoryStore } from './memory';
-import { RemoteStore } from './remote';
-import type { FlowStore, UpdateNodeInput } from './store';
-import type { ActivityEntry, Dependency, FlowNode, HumanVerdict, Project, Status } from './types';
+import type { FlowStore, NewNode, NodePatch } from './store';
+import type {
+  ActivityEntry,
+  Dependency,
+  FlowNode,
+  HumanVerdict,
+  NodeType,
+  Project,
+  Status
+} from './types';
 
-/**
- * The seam: the demo build keeps the in-memory fixtures, the real build (or a
- * plain `vite dev`) talks to the running core. Binary switch so tree-shaking
- * keeps the fixture data out of the production bundle.
- */
-export let store: FlowStore = import.meta.env.VITE_DEMO ? new MemoryStore() : new RemoteStore();
+/** Swap this for a client that talks to the Rust core. */
+export let store: FlowStore = new MemoryStore();
 
-/** Swap the store (tests inject a mocked FlowStore). Overrides the env choice. */
+/** Swap the store (tests inject a mocked FlowStore). */
 export function setStore(s: FlowStore) {
   store = s;
 }
@@ -20,6 +23,15 @@ export type ViewName = 'table' | 'lanes' | 'graph';
 export type PanelMode = 'peek' | 'expanded';
 /** Mobile: where the sheet is resting. */
 export type SheetMode = 'closed' | 'peek' | 'full';
+
+/** Every modal in the app is one of these. */
+export type Dialog =
+  | { kind: 'create'; nodeType: NodeType; parentId: string | null; title: string }
+  | { kind: 'delete'; nodeId: string }
+  | { kind: 'move'; nodeId: string; to: NodeType }
+  | { kind: 'newProject' }
+  | { kind: 'editProject'; projectId: string }
+  | null;
 
 const PANEL_KEY = 'fctrl.panelMode';
 const THEME_KEY = 'fctrl.theme';
@@ -62,17 +74,29 @@ export const app = $state({
 
   panelMode: 'peek' as PanelMode,
   sheet: 'closed' as SheetMode,
-  /** Desktop panel width while dragging the left edge. */
   dragging: false,
 
   paletteOpen: false,
   paletteQuery: '',
   editMode: false,
   showArchived: false,
+
+  // ── filters ───────────────────────────────────────────────────────────────
   statusFilter: [] as Status[],
+  /** Work-package ids; empty means all. */
+  wpFilter: [] as string[],
+  /** Verification buckets: 'verified' | 'failed' | 'stale' | 'none'. */
+  verFilter: [] as string[],
+  showSteps: false,
+  filterOpen: false,
 
   /** Lanes view on mobile shows one lane at a time. */
   laneIndex: 0,
+
+  // ── graph ─────────────────────────────────────────────────────────────────
+  zoom: 1,
+  /** Live edge being dragged between ports, in canvas coordinates. */
+  pendingEdge: null as { fromId: string; x: number; y: number } | null,
 
   expandedWp: {} as Record<string, boolean>,
   expandedTask: { 'T-1042': true } as Record<string, boolean>,
@@ -80,10 +104,12 @@ export const app = $state({
 
   /** Set when a human override would contradict an agent failure. */
   confirmOverride: null as string | null,
+  dialog: null as Dialog,
+  projectMenuOpen: false,
+  nodeMenuFor: null as string | null,
+  /** Viewport coords the node menu opens at. */
+  menuAt: { x: 0, y: 0 },
   draftComment: '',
-  /** "New task" dialog. */
-  taskDialog: false,
-  taskTitle: '',
   flash: ''
 });
 
@@ -108,6 +134,7 @@ export async function boot() {
 export async function load(projectId: string) {
   app.loading = true;
   app.projectId = projectId;
+  app.projectMenuOpen = false;
   try {
     const [nodes, deps, activity] = await Promise.all([
       store.nodes(projectId),
@@ -141,18 +168,24 @@ async function refresh() {
   app.activity = activity;
 }
 
+let lastChange: { id: string; prev: Status } | null = null;
+
 export async function setStatus(id: string, status: Status) {
   const node = app.nodes.find((n) => n.id === id);
   if (!node || node.status === status) return;
+  lastChange = { id, prev: node.status };
   await store.setStatus(id, status);
   await refresh();
   app.flash = `${id} → ${status} · the engine owns the cascade`;
 }
 
 export async function undo() {
-  await store.undo(app.projectId);
+  if (!lastChange) return;
+  const { id, prev } = lastChange;
+  lastChange = null;
+  await store.setStatus(id, prev);
   await refresh();
-  app.flash = 'undid last change';
+  app.flash = `undid ${id}`;
 }
 
 /**
@@ -193,36 +226,73 @@ export async function submitComment(id: string) {
   await refresh();
 }
 
-export function openTaskDialog() {
-  app.taskTitle = '';
-  app.taskDialog = true;
-}
+// ── node writes ─────────────────────────────────────────────────────────────
 
-export function closeTaskDialog() {
-  app.taskDialog = false;
-  app.taskTitle = '';
-}
-
-export async function createTask() {
-  const title = app.taskTitle.trim();
-  if (!title) return;
-  const wp = app.nodes.find((n) => n.type === 'WORK_PACKAGE');
-  await store.createNode({
-    projectId: app.projectId,
-    parentId: wp?.id ?? null,
-    kind: 'TASK',
-    title
-  });
-  app.taskDialog = false;
-  app.taskTitle = '';
+export async function createNode(input: NewNode, selectIt = false) {
+  const id = await store.createNode(input);
   await refresh();
-  app.flash = `created ${title}`;
+  if (input.type === 'WORK_PACKAGE') app.expandedWp[id] = true;
+  if (selectIt) app.selectedId = input.type === 'STEP' ? input.parentId : id;
+  app.flash = `created ${id}`;
+  return id;
 }
 
-export async function updateNode(id: string, patch: UpdateNodeInput) {
+export async function updateNode(id: string, patch: NodePatch) {
   await store.updateNode(id, patch);
   await refresh();
 }
+
+export async function deleteNode(id: string) {
+  const wasSelected = app.selectedId === id;
+  await store.deleteNode(id);
+  await refresh();
+  app.dialog = null;
+  app.nodeMenuFor = null;
+  if (wasSelected) app.selectedId = app.nodes.find((n) => n.type === 'TASK')?.id ?? null;
+  app.flash = `deleted ${id} · undoable for 30s`;
+}
+
+export async function moveNode(id: string, newParentId: string, newType: NodeType) {
+  await store.moveNode(id, newParentId, newType);
+  await refresh();
+  app.dialog = null;
+  app.nodeMenuFor = null;
+  app.selectedId = newType === 'STEP' ? newParentId : id;
+  app.flash = `${id} → ${newType.toLowerCase().replace('_', ' ')}`;
+}
+
+export async function addDependency(blockerId: string, blockedId: string) {
+  await store.addDependency(blockerId, blockedId);
+  await refresh();
+}
+
+export async function removeDependency(blockerId: string, blockedId: string) {
+  await store.removeDependency(blockerId, blockedId);
+  await refresh();
+}
+
+// ── project writes ──────────────────────────────────────────────────────────
+
+export async function createProject(name: string, description: string, seed: boolean) {
+  const id = await store.createProject(name, description, seed);
+  app.projects = await store.projects();
+  app.dialog = null;
+  await load(id);
+}
+
+export async function updateProject(id: string, patch: { name?: string; description?: string }) {
+  await store.updateProject(id, patch);
+  app.projects = await store.projects();
+  app.dialog = null;
+}
+
+export async function archiveProject(id: string, archived: boolean) {
+  await store.archiveProject(id, archived);
+  app.projects = await store.projects();
+  app.projectMenuOpen = false;
+}
+
+// ── ui ──────────────────────────────────────────────────────────────────────
 
 export function toggleTheme() {
   app.theme = app.theme === 'dark' ? 'light' : 'dark';
@@ -262,12 +332,76 @@ export function closeDetail() {
   app.sheet = 'closed';
 }
 
+export function closeOverlays() {
+  app.dialog = null;
+  app.filterOpen = false;
+  app.projectMenuOpen = false;
+  app.nodeMenuFor = null;
+  app.confirmOverride = null;
+}
+
+// ── filters ─────────────────────────────────────────────────────────────────
+
 export function toggleFilter(s: Status) {
   app.statusFilter = app.statusFilter.includes(s)
     ? app.statusFilter.filter((x) => x !== s)
     : [...app.statusFilter, s];
 }
 
-export function passesFilter(status: Status): boolean {
-  return app.statusFilter.length === 0 || app.statusFilter.includes(status);
+export function toggleWpFilter(id: string) {
+  app.wpFilter = app.wpFilter.includes(id)
+    ? app.wpFilter.filter((x) => x !== id)
+    : [...app.wpFilter, id];
+}
+
+export function toggleVerFilter(key: string) {
+  app.verFilter = app.verFilter.includes(key)
+    ? app.verFilter.filter((x) => x !== key)
+    : [...app.verFilter, key];
+}
+
+export function clearFilters() {
+  app.statusFilter = [];
+  app.wpFilter = [];
+  app.verFilter = [];
+  app.showArchived = false;
+}
+
+export function activeFilterCount(): number {
+  return (
+    app.statusFilter.length + app.wpFilter.length + app.verFilter.length + (app.showArchived ? 1 : 0)
+  );
+}
+
+function verBucket(n: FlowNode): string {
+  const v = n.verification;
+  if (!v) return 'none';
+  if (v.human === 'accepted' || v.agent === 'pass') return 'verified';
+  if (v.agent === 'fail') return 'failed';
+  if (v.agent === 'stale') return 'stale';
+  return 'none';
+}
+
+/** One predicate for every view, so the three cannot disagree. */
+export function passesAll(n: FlowNode): boolean {
+  if (app.statusFilter.length && !app.statusFilter.includes(n.status)) return false;
+  if (app.wpFilter.length) {
+    const wpId = n.type === 'WORK_PACKAGE' ? n.id : n.type === 'TASK' ? n.parentId : null;
+    if (!wpId || !app.wpFilter.includes(wpId)) return false;
+  }
+  if (app.verFilter.length && !app.verFilter.includes(verBucket(n))) return false;
+  return true;
+}
+
+// ── graph zoom ──────────────────────────────────────────────────────────────
+
+export const ZOOM_MIN = 0.35;
+export const ZOOM_MAX = 2;
+
+export function setZoom(z: number) {
+  app.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+}
+
+export function zoomBy(factor: number) {
+  setZoom(app.zoom * factor);
 }

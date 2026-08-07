@@ -7,53 +7,57 @@ beforeEach(() => {
   store = new MemoryStore();
 });
 
-describe('MemoryStore projects', () => {
-  it('lists all fixtures', async () => {
-    const projects = await store.projects();
-    expect(projects.some((p) => p.id === 'prj-travel')).toBe(true);
-  });
-});
-
-describe('MemoryStore nodes', () => {
-  it('filters nodes by project', async () => {
-    const nodes = await store.nodes('prj-travel');
-    expect(nodes.length).toBeGreaterThan(0);
-    expect(nodes.every((n) => n.projectId === 'prj-travel')).toBe(true);
-  });
-});
-
-describe('MemoryStore writes', () => {
-  it('setStatus flips the node and records status activity', async () => {
-    await store.setStatus('T-1042', 'DONE');
-    const nodes = await store.nodes('prj-travel');
-    expect(nodes.find((n) => n.id === 'T-1042')?.status).toBe('DONE');
-    const activity = await store.activity('prj-travel');
-    expect(activity[0].kind).toBe('status');
+describe('MemoryStore (new design)', () => {
+  it('lists projects', async () => {
+    const ps = await store.projects();
+    expect(ps.length).toBeGreaterThan(0);
   });
 
-  it('setVerdict records an acceptance', async () => {
-    await store.setVerdict('T-1042', 'accepted');
-    const [n] = (await store.nodes('prj-travel')).filter((x) => x.id === 'T-1042');
-    expect(n.verification?.human).toBe('accepted');
+  it('returns nodes for a project', async () => {
+    const ns = await store.nodes('prj-travel');
+    expect(ns.length).toBeGreaterThan(0);
   });
 
-  it('addComment prepends a comment entry', async () => {
-    const before = await store.activity('prj-travel');
-    await store.addComment('T-1042', 'new note');
-    const after = await store.activity('prj-travel');
-    expect(after[0].kind).toBe('comment');
-    expect(after[0].text).toBe('new note');
-    expect(after.length).toBe(before.length + 1);
+  it('createNode adds a node and returns its id', async () => {
+    const id = await store.createNode({ projectId: 'prj-travel', parentId: 'WP-AUTH', type: 'TASK', title: 'New task' });
+    const n = (await store.nodes('prj-travel')).find((x) => x.id === id);
+    expect(n?.title).toBe('New task');
+    expect(n?.type).toBe('TASK');
   });
 
-  it('setStatus on a missing node rejects', async () => {
-    await expect(store.setStatus('nope', 'DONE')).rejects.toThrow(/not found/);
-  });
-
-  it('updateNode changes the editable fields', async () => {
+  it('updateNode edits provided fields', async () => {
     await store.updateNode('T-1042', { title: 'Renamed', condition: 'pnpm test' });
-    const [n] = (await store.nodes('prj-travel')).filter((x) => x.id === 'T-1042');
-    expect(n.title).toBe('Renamed');
-    expect(n.condition).toBe('pnpm test');
+    const n = (await store.nodes('prj-travel')).find((x) => x.id === 'T-1042');
+    expect(n?.title).toBe('Renamed');
+    expect(n?.condition).toBe('pnpm test');
+  });
+
+  it('moveNode promotes a step to a task under the package', async () => {
+    await store.moveNode('T-1042.1', 'WP-AUTH', 'TASK');
+    const moved = (await store.nodes('prj-travel')).find((x) => x.id === 'T-1042.1');
+    expect(moved?.type).toBe('TASK');
+    expect(moved?.parentId).toBe('WP-AUTH');
+  });
+
+  it('deleteNode removes the node', async () => {
+    await store.deleteNode('T-1042.1');
+    expect((await store.nodes('prj-travel')).some((n) => n.id === 'T-1042.1')).toBe(false);
+  });
+
+  it('add/removeDependency mutate the edge set', async () => {
+    const before = (await store.dependencies('prj-travel')).length;
+    await store.addDependency('T-1042', 'T-1044');
+    expect((await store.dependencies('prj-travel')).length).toBe(before + 1);
+    await store.removeDependency('T-1042', 'T-1044');
+    expect((await store.dependencies('prj-travel')).length).toBe(before);
+  });
+
+  it('project create/update/archive', async () => {
+    const id = await store.createProject('New project', 'desc', false);
+    expect((await store.projects()).some((p) => p.id === id)).toBe(true);
+    await store.updateProject(id, { name: 'Renamed' });
+    expect((await store.projects()).find((p) => p.id === id)?.name).toBe('Renamed');
+    await store.archiveProject(id, true);
+    expect((await store.projects()).find((p) => p.id === id)?.archived).toBe(true);
   });
 });

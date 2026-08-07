@@ -1,22 +1,26 @@
-import type { ActivityEntry, Dependency, FlowNode, HumanVerdict, NodeType, Project, Status } from './types';
+import type {
+  ActivityEntry,
+  Dependency,
+  FlowNode,
+  HumanVerdict,
+  NodeType,
+  Project,
+  Status
+} from './types';
 
-/** Input needed to create a node (a work package, task or step). */
-export interface CreateNodeInput {
+export interface NewNode {
   projectId: string;
-  /** Parent id; empty for a work package. */
   parentId: string | null;
-  kind: NodeType;
+  type: NodeType;
   title: string;
-  description?: string;
+  description?: string[];
   condition?: string;
 }
 
-/** Editable node fields. Only the fields provided are written (update mask). */
-export interface UpdateNodeInput {
+export interface NodePatch {
   title?: string;
-  description?: string;
+  description?: string[];
   condition?: string;
-  reference?: string;
 }
 
 /**
@@ -32,21 +36,26 @@ export interface FlowStore {
   nodes(projectId: string): Promise<FlowNode[]>;
   dependencies(projectId: string): Promise<Dependency[]>;
   activity(projectId: string): Promise<ActivityEntry[]>;
+
   /** Writes one node. The engine owns the downstream cascade. */
   setStatus(nodeId: string, status: Status): Promise<void>;
   /** Records the human's acceptance or rejection of a condition. */
   setVerdict(nodeId: string, verdict: HumanVerdict): Promise<void>;
   addComment(nodeId: string, text: string): Promise<void>;
-  /** Creates a node; returns its id. */
-  createNode(input: CreateNodeInput): Promise<string>;
-  /** Updates editable fields of a node (only provided fields are written). */
-  updateNode(nodeId: string, patch: UpdateNodeInput): Promise<void>;
-  /** Deletes a node and its subtree. */
+
+  createNode(input: NewNode): Promise<string>;
+  updateNode(nodeId: string, patch: NodePatch): Promise<void>;
   deleteNode(nodeId: string): Promise<void>;
-  /** Adds a dependency edge. */
+  /**
+   * Promote, demote, reparent and reorder are all the same write. Passing a
+   * different `type` is what makes it a promote or a demote.
+   */
+  moveNode(nodeId: string, newParentId: string, newType: NodeType): Promise<void>;
+
   addDependency(blockerId: string, blockedId: string): Promise<void>;
-  /** Removes a dependency edge. */
   removeDependency(blockerId: string, blockedId: string): Promise<void>;
-  /** Reverses the most recent event for a project (server-side undo). */
-  undo(projectId: string): Promise<void>;
+
+  createProject(name: string, description: string, seedWorkPackage: boolean): Promise<string>;
+  updateProject(projectId: string, patch: { name?: string; description?: string }): Promise<void>;
+  archiveProject(projectId: string, archived: boolean): Promise<void>;
 }

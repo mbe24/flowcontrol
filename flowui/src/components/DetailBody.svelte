@@ -1,8 +1,22 @@
 <script lang="ts">
-  import { app, closeDetail, setStatus, setVerdict, submitComment, toggleStep, togglePanelMode, toggleVerified, undo } from '../lib/state.svelte';
+  import {
+    app,
+    closeDetail,
+    setStatus,
+    setVerdict,
+    submitComment,
+    toggleStep,
+    togglePanelMode,
+    toggleVerified,
+    undo,
+    updateNode
+  } from '../lib/state.svelte';
   import { buildIndex, stepRatio, stepsOf } from '../lib/derive';
   import { ACTIVITY_VAR, ALL_STATUSES, STATUS_VAR, stepGlyph, verifyBadge } from '../lib/types';
   import type { FlowNode } from '../lib/types';
+  import EditableField from './EditableField.svelte';
+  import InlineCreateRow from './InlineCreateRow.svelte';
+  import DependencyPicker from './DependencyPicker.svelte';
 
   interface Props {
     /** 'peek' | 'expanded' on desktop, 'sheet' when inside the mobile sheet. */
@@ -20,17 +34,42 @@
   const blocks = $derived(index.blocks.get(node.id) ?? []);
   const entries = $derived(app.activity.filter((a) => a.nodeId === node.id));
   const wide = $derived(mode === 'expanded');
+  // Build the path in code so Svelte never trims the whitespace around "/".
+  const crumb = $derived.by(() => {
+    const parts: string[] = [];
+    if (wide) {
+      const p = app.projects.find((x) => x.id === app.projectId);
+      if (p) parts.push(p.name);
+    }
+    if (wp) parts.push(wp.title);
+    parts.push(node.id);
+    return parts.join(' / ');
+  });
   /** In peek the description truncates; expanded and full-screen show it all. */
   const paras = $derived(mode === 'peek' ? node.description.slice(0, 1) : node.description);
   const truncated = $derived(mode === 'peek' && node.description.length > 1);
+
+  let editingDesc = $state(false);
+  let descDraft = $state('');
+  let descEl: HTMLTextAreaElement | undefined = $state();
+
+  function startDesc() {
+    descDraft = node.description.join('\n\n');
+    editingDesc = true;
+    queueMicrotask(() => descEl?.focus());
+  }
+  async function saveDesc() {
+    const next = descDraft.trim();
+    editingDesc = false;
+    if (next === node.description.join('\n\n')) return;
+    await updateNode(node.id, { description: next ? next.split(/\n{2,}/).map((x) => x.trim()) : [] });
+  }
 </script>
 
 <div class="detail" class:wide>
   <header class:big={wide}>
     <div class="crumb">
-      <span class="mono path">
-        {#if wide}{app.projects.find((p) => p.id === app.projectId)?.name} / {/if}{wp?.title} / {node.id}
-      </span>
+      <span class="mono path">{crumb}</span>
       {#if mode !== 'sheet'}
         <button
           class="icon"
@@ -38,12 +77,20 @@
           title={wide ? 'Collapse panel' : 'Expand panel'}
           onclick={togglePanelMode}>{wide ? '⤡' : '⤢'}</button>
       {/if}
+      <button
+        class="icon"
+        title="Actions"
+        onclick={(e) => {
+          const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          app.menuAt = { x: Math.min(r.left - 190, window.innerWidth - 250), y: r.bottom + 6 };
+          app.nodeMenuFor = node.id;
+        }}>⋯</button>
       <button class="icon plain" onclick={closeDetail} aria-label="Close">✕</button>
     </div>
 
     <div class="title" class:big={wide}>
       <span class="dot" style:background={STATUS_VAR[node.status]}></span>
-      <h1>{node.title}</h1>
+      <h1><EditableField nodeId={node.id} field="title" value={node.title} placeholder="Untitled" /></h1>
     </div>
 
     <div class="statusrow" class:inline={wide}>
@@ -64,22 +111,38 @@
 
   <div class="cols" class:two={wide}>
     <div class="col scroll">
-      {#if paras.length}
-        <section>
-          <span class="label">Description</span>
-          {#each paras as p}
-            <p class:lead={wide}>{p}</p>
-          {/each}
+      <section>
+        <span class="label">Description</span>
+        {#if editingDesc}
+          <textarea
+            bind:this={descEl}
+            bind:value={descDraft}
+            rows={wide ? 8 : 5}
+            onblur={saveDesc}
+            onkeydown={(e) => {
+              if (e.key === 'Escape') { e.stopPropagation(); editingDesc = false; }
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) saveDesc();
+            }}></textarea>
+          <span class="mono fine">⌘↵ save · esc revert · blank line starts a paragraph</span>
+        {:else if paras.length}
+          <button class="proseedit" onclick={startDesc}>
+            {#each paras as p}
+              <p class:lead={wide}>{p}</p>
+            {/each}
+          </button>
           {#if truncated}
             <button class="more" onclick={togglePanelMode}>more</button>
           {/if}
-        </section>
-      {/if}
+        {:else}
+          <button class="proseedit empty" onclick={startDesc}>Add a description…</button>
+        {/if}
+      </section>
 
-      {#if node.condition}
-        <section>
+      <section>
           <span class="label">Condition</span>
-          <div class="mono field">{node.condition}</div>
+          <div class="mono field">
+            <EditableField nodeId={node.id} field="condition" value={node.condition ?? ''} placeholder="none set" />
+          </div>
           <div class="result" style:border-color={badge.color} style:background={badge.bg}>
             <button
               class="check"
@@ -97,7 +160,6 @@
           </div>
           <span class="fine">fctrl never runs conditions. The agent reports; you accept.</span>
         </section>
-      {/if}
 
       {#if !wide}
         {@render stepList()}
@@ -148,34 +210,29 @@
           {/if}
         </div>
       {/each}
+      <InlineCreateRow
+        projectId={app.projectId}
+        parentId={node.id}
+        type="STEP"
+        label="Add a step…"
+        onEscalate={(title) => (app.dialog = { kind: 'create', nodeType: 'STEP', parentId: node.id, title })} />
+    </section>
+  {:else}
+    <section>
+      <span class="label">Steps</span>
+      <InlineCreateRow
+        projectId={app.projectId}
+        parentId={node.id}
+        type="STEP"
+        variant="prominent"
+        label="Break this into steps…"
+        onEscalate={(title) => (app.dialog = { kind: 'create', nodeType: 'STEP', parentId: node.id, title })} />
     </section>
   {/if}
 {/snippet}
 
 {#snippet depList()}
-  {#if blockers.length || blocks.length}
-    <section>
-      <span class="label">Dependencies</span>
-      {#each blockers as id}
-        {@const o = index.byId.get(id)}
-        <div class="dep">
-          <span class="mono dir">blocked by</span>
-          <span class="ddot" style:background={o ? STATUS_VAR[o.status] : 'var(--fg3)'}></span>
-          <span class="mono did">{id}</span>
-          <span class="dtitle">{o?.title ?? 'outside this project'}</span>
-        </div>
-      {/each}
-      {#each blocks as id}
-        {@const o = index.byId.get(id)}
-        <div class="dep">
-          <span class="mono dir">blocks</span>
-          <span class="ddot" style:background={o ? STATUS_VAR[o.status] : 'var(--fg3)'}></span>
-          <span class="mono did">{id}</span>
-          <span class="dtitle">{o?.title ?? 'outside this project'}</span>
-        </div>
-      {/each}
-    </section>
-  {/if}
+  <DependencyPicker {node} />
 {/snippet}
 
 {#snippet activityList()}
@@ -384,6 +441,44 @@
     line-height: 1.62;
     color: var(--fg);
     opacity: 0.85;
+  }
+  .proseedit {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    padding: 7px 9px;
+    margin: -7px -9px;
+    font: inherit;
+    color: inherit;
+    cursor: text;
+  }
+  .proseedit:hover {
+    background: var(--panel2);
+    border-color: var(--border);
+  }
+  .proseedit.empty {
+    font-size: 12.5px;
+    color: var(--fg3);
+  }
+  .proseedit p + p {
+    margin-top: 9px;
+  }
+  textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--panel2);
+    border: 1px solid var(--accent);
+    border-radius: 7px;
+    padding: 9px 10px;
+    color: var(--fg);
+    font-family: inherit;
+    font-size: 12.5px;
+    line-height: 1.55;
+    outline: none;
+    resize: vertical;
   }
   .more {
     align-self: flex-start;
@@ -635,6 +730,18 @@
   }
   .spacer {
     flex: 1;
+  }
+  @media (max-width: 860px) {
+    .sbtn.tall {
+      min-height: 44px;
+    }
+    .icon {
+      width: 32px;
+      height: 32px;
+    }
+    textarea {
+      font-size: 16px;
+    }
   }
   .undo {
     background: transparent;

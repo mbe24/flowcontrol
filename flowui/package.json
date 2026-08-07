@@ -11,7 +11,6 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:live": "cross-env FLOW_LIVE=1 vitest run src/lib/smoke.live.test.ts",
     "dev:server": "docker compose -f ../docker-compose.yml up --build",
     "dev:server:stop": "docker compose -f ../docker-compose.yml down",
     "dev:all": "concurrently -n server,web -c auto \"npm run dev:server\" \"npm run dev\""

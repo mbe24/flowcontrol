@@ -1,15 +1,19 @@
-import type { CreateNodeInput, FlowStore, UpdateNodeInput } from './store';
+import type { FlowStore, NewNode, NodePatch } from './store';
 import type {
   ActivityEntry,
   AgentResult,
   Dependency,
   FlowNode,
   HumanVerdict,
+  NodeType,
   Project,
   Status,
   Verification
 } from './types';
 import { NO_VERIFICATION } from './types';
+
+const slug = (s: string) =>
+  s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 12) || 'x';
 
 const ver = (agent: AgentResult, agentName = '', agentWhen = '', human: HumanVerdict = 'none', humanWhen = ''): Verification => ({
   agent,
@@ -207,16 +211,15 @@ const ACTIVITY: ActivityEntry[] = [
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export class MemoryStore implements FlowStore {
+  private projectList: Project[] = PROJECTS.map((p) => ({ ...p }));
   private nodeList: FlowNode[] = NODES.map((n) => ({ ...n, verification: n.verification ? { ...n.verification } : undefined }));
   private depList: Dependency[] = DEPS.map((d) => ({ ...d }));
   private activityList: ActivityEntry[] = ACTIVITY.map((a) => ({ ...a }));
   private seq = 100;
-  /** Ids this session created, in order; backs the fixture's undo. */
-  private createdStack: string[] = [];
 
   async projects(): Promise<Project[]> {
     await sleep(60);
-    return PROJECTS.map((p) => ({ ...p }));
+    return this.projectList.map((p) => ({ ...p }));
   }
 
   async nodes(projectId: string): Promise<FlowNode[]> {
@@ -262,66 +265,171 @@ export class MemoryStore implements FlowStore {
     this.push(nodeId, 'comment', text);
   }
 
-  async createNode(input: CreateNodeInput): Promise<string> {
-    await sleep(40);
+  // ── writes ────────────────────────────────────────────────────────────────
+
+  async createNode(input: NewNode): Promise<string> {
+    await sleep(50);
+    const id = this.mintId(input);
     const node: FlowNode = {
-      id: `node-${this.seq++}`,
+      id,
       projectId: input.projectId,
       parentId: input.parentId,
-      type: input.kind,
+      type: input.type,
       title: input.title,
-      description: input.description ? [input.description] : [],
-      status: 'READY',
-      condition: input.condition || undefined,
-      state: input.kind === 'WORK_PACKAGE' ? 'PLANNED' : undefined,
-      verification: NO_VERIFICATION
+      description: input.description ?? [],
+      status: input.type === 'WORK_PACKAGE' ? 'READY' : 'READY',
+      condition: input.condition ?? '',
+      state: input.type === 'WORK_PACKAGE' ? 'PLANNED' : undefined,
+      verification: input.type === 'STEP' ? undefined : { ...NO_VERIFICATION }
     };
-    this.nodeList = [...this.nodeList, node];
-    this.createdStack.push(node.id);
-    this.push(node.id, 'edit', `created ${node.id}`);
-    return node.id;
+    // Insert after the last existing sibling so it lands where you typed it.
+    const lastSibling = this.nodeList.map((n, i) => ({ n, i })).filter(({ n }) => n.parentId === input.parentId).pop();
+    if (lastSibling) this.nodeList.splice(lastSibling.i + 1, 0, node);
+    else this.nodeList.push(node);
+    this.push(id, 'edit', `Created ${input.type.toLowerCase().replace('_', ' ')} “${input.title}”`);
+    return id;
   }
 
-  async deleteNode(nodeId: string): Promise<void> {
-    await sleep(40);
-    this.nodeList = this.nodeList.filter((n) => n.id !== nodeId && n.parentId !== nodeId);
-    this.depList = this.depList.filter((d) => d.blockerId !== nodeId && d.blockedId !== nodeId);
-    this.push(nodeId, 'edit', `deleted ${nodeId}`);
-    this.createdStack = this.createdStack.filter((id) => id !== nodeId);
-  }
-
-  async updateNode(nodeId: string, patch: UpdateNodeInput): Promise<void> {
+  async updateNode(nodeId: string, patch: NodePatch): Promise<void> {
     await sleep(40);
     const n = this.nodeList.find((x) => x.id === nodeId);
     if (!n) throw new Error(`node not found: ${nodeId}`);
-    if (patch.title !== undefined) n.title = patch.title;
-    if (patch.description !== undefined) n.description = patch.description ? [patch.description] : [];
-    if (patch.condition !== undefined) n.condition = patch.condition;
-    if (patch.reference !== undefined) (n as { reference?: string }).reference = patch.reference;
-    this.push(nodeId, 'edit', `updated ${nodeId}`);
+    const changed: string[] = [];
+    if (patch.title !== undefined && patch.title !== n.title) {
+      n.title = patch.title;
+      changed.push('title');
+    }
+    if (patch.description !== undefined) {
+      n.description = patch.description;
+      changed.push('description');
+    }
+    if (patch.condition !== undefined && patch.condition !== n.condition) {
+      n.condition = patch.condition;
+      changed.push('condition');
+      // The node moved on, so an existing agent report no longer describes it.
+      if (n.verification && n.verification.agent !== 'none') {
+        n.verification = { ...n.verification, agent: 'stale' };
+      }
+    }
+    if (changed.length) this.push(nodeId, 'edit', `Edited ${changed.join(', ')}`);
+  }
+
+  async deleteNode(nodeId: string): Promise<void> {
+    await sleep(50);
+    const doomed = new Set<string>([nodeId]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const n of this.nodeList) {
+        if (n.parentId && doomed.has(n.parentId) && !doomed.has(n.id)) {
+          doomed.add(n.id);
+          grew = true;
+        }
+      }
+    }
+    this.nodeList = this.nodeList.filter((n) => !doomed.has(n.id));
+    this.depList = this.depList.filter((d) => !doomed.has(d.blockerId) && !doomed.has(d.blockedId));
+    // Activity is append-only: the history of a deleted node survives.
+    this.push(nodeId, 'edit', `Deleted ${nodeId}${doomed.size > 1 ? ` and ${doomed.size - 1} descendants` : ''}`);
+  }
+
+  async moveNode(nodeId: string, newParentId: string, newType: NodeType): Promise<void> {
+    await sleep(50);
+    const n = this.nodeList.find((x) => x.id === nodeId);
+    if (!n) throw new Error(`node not found: ${nodeId}`);
+    const from = n.type;
+
+    // Demoting to a step drops the node's own steps: the operator is saying
+    // this was smaller than they thought, so its breakdown is noise. The title
+    // carries over and becomes the step.
+    if (newType === 'STEP' && from !== 'STEP') {
+      const kids = this.nodeList.filter((x) => x.parentId === nodeId).map((x) => x.id);
+      this.nodeList = this.nodeList.filter((x) => x.parentId !== nodeId);
+      this.depList = this.depList.filter(
+        (d) => !kids.includes(d.blockerId) && !kids.includes(d.blockedId)
+      );
+      n.verification = undefined;
+    }
+    if (newType !== 'STEP' && from === 'STEP') {
+      n.verification = { ...NO_VERIFICATION };
+    }
+
+    n.parentId = newParentId;
+    n.type = newType;
+    n.state = newType === 'WORK_PACKAGE' ? n.state ?? 'PLANNED' : undefined;
+
+    // Re-seat the node next to its new siblings so the tree reads in order.
+    const i = this.nodeList.findIndex((x) => x.id === nodeId);
+    const [moved] = this.nodeList.splice(i, 1);
+    const lastSibling = this.nodeList
+      .map((x, j) => ({ x, j }))
+      .filter(({ x }) => x.parentId === newParentId)
+      .pop();
+    if (lastSibling) this.nodeList.splice(lastSibling.j + 1, 0, moved);
+    else this.nodeList.push(moved);
+
+    const verb = from === 'STEP' ? 'Promoted' : newType === 'STEP' ? 'Demoted' : 'Moved';
+    this.push(nodeId, 'edit', `${verb} to ${newType.toLowerCase().replace('_', ' ')}`);
   }
 
   async addDependency(blockerId: string, blockedId: string): Promise<void> {
     await sleep(40);
-    if (!this.depList.some((d) => d.blockerId === blockerId && d.blockedId === blockedId)) {
-      this.depList = [...this.depList, { blockerId, blockedId }];
-    }
-    this.push(blockedId, 'edit', `${blockerId} blocks ${blockedId}`);
+    if (blockerId === blockedId) return;
+    if (this.depList.some((d) => d.blockerId === blockerId && d.blockedId === blockedId)) return;
+    this.depList = [...this.depList, { blockerId, blockedId }];
+    this.push(blockedId, 'edit', `Now blocked by ${blockerId}`);
   }
 
   async removeDependency(blockerId: string, blockedId: string): Promise<void> {
     await sleep(40);
     this.depList = this.depList.filter((d) => !(d.blockerId === blockerId && d.blockedId === blockedId));
-    this.push(blockedId, 'edit', `${blockerId} no longer blocks ${blockedId}`);
+    this.push(blockedId, 'edit', `No longer blocked by ${blockerId}`);
   }
 
-  async undo(projectId: string): Promise<void> {
+  async createProject(name: string, description: string, seedWorkPackage: boolean): Promise<string> {
+    await sleep(60);
+    const id = `prj-${slug(name)}-${this.seq++}`;
+    this.projectList = [...this.projectList, { id, name, description, createdAt: Date.now() }];
+    if (seedWorkPackage) {
+      this.nodeList.push({
+        id: `WP-${slug(name).toUpperCase()}`,
+        projectId: id,
+        parentId: null,
+        type: 'WORK_PACKAGE',
+        title: 'First work package',
+        description: [],
+        status: 'READY',
+        state: 'ACTIVE',
+        verification: { ...NO_VERIFICATION }
+      });
+    }
+    return id;
+  }
+
+  async updateProject(projectId: string, patch: { name?: string; description?: string }): Promise<void> {
     await sleep(40);
-    const id = this.createdStack.pop();
-    if (!id) return;
-    this.nodeList = this.nodeList.filter((n) => n.id !== id && n.parentId !== id);
-    this.depList = this.depList.filter((d) => d.blockerId !== id && d.blockedId !== id);
-    this.push(id, 'edit', `undid creation of ${id}`);
+    this.projectList = this.projectList.map((p) => (p.id === projectId ? { ...p, ...patch } : p));
+  }
+
+  async archiveProject(projectId: string, archived: boolean): Promise<void> {
+    await sleep(40);
+    this.projectList = this.projectList.map((p) => (p.id === projectId ? { ...p, archived } : p));
+  }
+
+  /** T-1042.3 style ids: parent prefix plus the next free sibling ordinal. */
+  private mintId(input: NewNode): string {
+    if (input.type === 'WORK_PACKAGE') {
+      return `WP-${slug(input.title).toUpperCase().slice(0, 8)}-${this.seq++}`;
+    }
+    if (input.type === 'STEP' && input.parentId) {
+      const n = this.nodeList.filter((x) => x.parentId === input.parentId).length + 1;
+      return `${input.parentId}.${n}`;
+    }
+    const used = this.nodeList
+      .filter((x) => x.type === 'TASK')
+      .map((x) => parseInt(x.id.replace(/\D/g, ''), 10))
+      .filter((x) => !Number.isNaN(x));
+    return `T-${Math.max(1000, ...used) + 1}`;
   }
 
   private push(nodeId: string, kind: ActivityEntry['kind'], text: string) {

@@ -1,42 +1,56 @@
 <script lang="ts">
-  import {
-    app,
-    select,
-    setStatus,
-    toggleTask,
-    toggleWp,
-    passesFilter,
-  } from '../lib/state.svelte';
-  import {
-    buildIndex,
-    stepRatio,
-    stepsOf,
-    tasksOf,
-    workPackages,
-    wpCounts,
-  } from '../lib/derive';
+  import { app, select, setStatus, toggleTask, toggleWp, passesAll } from '../lib/state.svelte';
+  import { buildIndex, stepRatio, stepsOf, tasksOf, workPackages, wpCounts } from '../lib/derive';
   import { STATUS_VAR, stepGlyph, verifyBadge } from '../lib/types';
   import type { FlowNode, Status } from '../lib/types';
+  import InlineCreateRow from './InlineCreateRow.svelte';
+  import EmptyState from './EmptyState.svelte';
 
   const index = $derived(buildIndex(app.nodes, app.deps));
+  const allWps = $derived(workPackages(app.nodes));
   const wps = $derived(
-    workPackages(app.nodes).filter(
-      (w) => app.showArchived || (w.state !== 'DONE' && w.state !== 'ARCHIVED'),
-    ),
+    allWps
+      .filter((w) => app.showArchived || (w.state !== 'DONE' && w.state !== 'ARCHIVED'))
+      .filter((w) => !app.wpFilter.length || app.wpFilter.includes(w.id))
   );
-  const hidden = $derived(
-    workPackages(app.nodes).filter(
-      (w) => w.state === 'DONE' || w.state === 'ARCHIVED',
-    ).length,
-  );
+  const hidden = $derived(allWps.filter((w) => w.state === 'DONE' || w.state === 'ARCHIVED').length);
   const mobile = $derived(app.width < 860);
-  const narrow = $derived(
-    app.panelMode === 'expanded' && !!app.selectedId && !mobile,
-  );
+  const narrow = $derived(app.panelMode === 'expanded' && !!app.selectedId && !mobile);
+
+  const visibleTasks = (wpId: string) => tasksOf(app.nodes, wpId).filter(passesAll);
+  const anyVisible = $derived(wps.some((w) => visibleTasks(w.id).length > 0));
+  /** Nothing exists at all vs. everything is filtered away — different screens. */
+  const emptyProject = $derived(allWps.length === 0);
+  const filteredOut = $derived(!emptyProject && !anyVisible && wps.length > 0);
 
   const pct = (n: number, total: number) => (total ? (n / total) * 100 : 0);
 
-  /** Swipe a row left/right to set status without opening anything. */
+  function openMenu(e: MouseEvent, id: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    app.menuAt = { x: Math.min(e.clientX, window.innerWidth - 250), y: e.clientY };
+    app.nodeMenuFor = id;
+  }
+
+  /** Tab / Shift-Tab on a selected row — the outliner idiom. */
+  function onRowKey(e: KeyboardEvent, node: FlowNode) {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      if (e.shiftKey && node.type === 'STEP') {
+        app.dialog = { kind: 'move', nodeId: node.id, to: 'TASK' };
+      } else if (!e.shiftKey && node.type === 'TASK') {
+        app.dialog = { kind: 'move', nodeId: node.id, to: 'STEP' };
+      }
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      app.dialog = { kind: 'delete', nodeId: node.id };
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      select(node.id);
+    }
+  }
+
+  // swipe a card to set status, mobile only
   let swipeId = $state('');
   let swipeX = $state(0);
   let startX = 0;
@@ -55,16 +69,20 @@
     swipeId = '';
     swipeX = 0;
     if (Math.abs(dx) < 70) return;
-    const next: Status =
-      dx > 0 ? 'DONE' : t.status === 'BLOCKED' ? 'READY' : 'BLOCKED';
+    const next: Status = dx > 0 ? 'DONE' : t.status === 'BLOCKED' ? 'READY' : 'BLOCKED';
     setStatus(t.id, next);
   }
 </script>
 
-{#if mobile}
+{#if emptyProject}
+  <EmptyState kind="project" />
+{:else if filteredOut}
+  <EmptyState kind="filtered" />
+{:else if mobile}
   <div class="cards">
     {#each wps as wp (wp.id)}
       {@const counts = wpCounts(app.nodes, wp.id)}
+      {@const tasks = visibleTasks(wp.id)}
       <div class="cardwp">
         <button class="wphead" onclick={() => toggleWp(wp.id)}>
           <span class="caret">{app.expandedWp[wp.id] ? '▾' : '▸'}</span>
@@ -72,70 +90,55 @@
           <span class="mono wppct">{counts.pct}%</span>
         </button>
         <div class="track thin">
-          <div
-            style:width="{pct(counts.done, counts.total)}%"
-            style:background="var(--done)"
-          ></div>
-          <div
-            style:width="{pct(counts.ready, counts.total)}%"
-            style:background="var(--ready)"
-          ></div>
-          <div
-            style:width="{pct(counts.blocked, counts.total)}%"
-            style:background="var(--blocked)"
-          ></div>
-          <div
-            style:width="{pct(counts.deferred, counts.total)}%"
-            style:background="var(--deferred)"
-          ></div>
+          <div style:width="{pct(counts.done, counts.total)}%" style:background="var(--done)"></div>
+          <div style:width="{pct(counts.ready, counts.total)}%" style:background="var(--ready)"></div>
+          <div style:width="{pct(counts.blocked, counts.total)}%" style:background="var(--blocked)"></div>
+          <div style:width="{pct(counts.deferred, counts.total)}%" style:background="var(--deferred)"></div>
         </div>
       </div>
       {#if app.expandedWp[wp.id]}
-        {#each tasksOf(app.nodes, wp.id).filter( (t) => passesFilter(t.status) ) as t (t.id)}
+        {#each tasks as t (t.id)}
           {@const ratio = stepRatio(app.nodes, t.id)}
           {@const badge = verifyBadge(t.verification)}
           <button
             class="card"
             class:sel={app.selectedId === t.id}
-            style:transform={swipeId === t.id
-              ? `translateX(${swipeX}px)`
-              : 'none'}
+            style:transform={swipeId === t.id ? `translateX(${swipeX}px)` : 'none'}
             onpointerdown={(e) => down(e, t.id)}
             onpointermove={move}
             onpointerup={() => up(t)}
             onpointercancel={() => (swipeId = '')}
-            onclick={() => select(t.id)}
-          >
+            oncontextmenu={(e) => openMenu(e, t.id)}
+            onclick={() => select(t.id)}>
             <div class="cmeta">
               <span class="cdot" style:background={STATUS_VAR[t.status]}></span>
               <span class="mono cid">{t.id}</span>
-              <span class="mono cver" style:color={badge.color}
-                >{badge.glyph}</span
-              >
+              <span class="mono cver" style:color={badge.color}>{badge.glyph}</span>
               <span class="mono csteps">{ratio.label}</span>
             </div>
-            <span
-              class="ctitle"
-              style:color={t.status === 'DONE' ? 'var(--fg2)' : 'var(--fg)'}
-              >{t.title}</span
-            >
+            <span class="ctitle" style:color={t.status === 'DONE' ? 'var(--fg2)' : 'var(--fg)'}>{t.title}</span>
             {#if (index.blockers.get(t.id) ?? []).length}
               <div class="cchips">
                 {#each index.blockers.get(t.id) ?? [] as b}
                   {@const bn = index.byId.get(b)}
                   <span class="mono cchip">
-                    <span
-                      class="tinydot"
-                      style:background={bn
-                        ? STATUS_VAR[bn.status]
-                        : 'var(--fg3)'}
-                    ></span>{b}
+                    <span class="tinydot" style:background={bn ? STATUS_VAR[bn.status] : 'var(--fg3)'}></span>{b}
                   </span>
                 {/each}
               </div>
             {/if}
           </button>
         {/each}
+        {#if tasks.length === 0}
+          <span class="nonetask">No tasks in this package</span>
+        {/if}
+        <InlineCreateRow
+          projectId={app.projectId}
+          parentId={wp.id}
+          type="TASK"
+          variant={tasks.length === 0 ? 'prominent' : 'ghost'}
+          label={tasks.length === 0 ? 'Add the first task…' : `Add task to ${wp.title}`}
+          onEscalate={(title) => (app.dialog = { kind: 'create', nodeType: 'TASK', parentId: wp.id, title })} />
       {/if}
     {/each}
     <p class="hint">Swipe a card right to mark DONE, left to toggle BLOCKED.</p>
@@ -145,21 +148,16 @@
   <div class="rail">
     {#each wps as wp (wp.id)}
       <div class="railhead">
-        <span
-          class="hue"
-          style:background={STATUS_VAR[
-            wp.state === 'ACTIVE' ? 'READY' : 'DEFERRED'
-          ]}
-        ></span>
+        <span class="hue" style:background={STATUS_VAR[wp.state === 'ACTIVE' ? 'READY' : 'DEFERRED']}></span>
         <span class="rname">{wp.title}</span>
         <span class="mono rpct">{wpCounts(app.nodes, wp.id).pct}%</span>
       </div>
-      {#each tasksOf(app.nodes, wp.id).filter( (t) => passesFilter(t.status) ) as t (t.id)}
+      {#each visibleTasks(wp.id) as t (t.id)}
         <button
           class="railrow"
           class:sel={app.selectedId === t.id}
-          onclick={() => select(t.id)}
-        >
+          oncontextmenu={(e) => openMenu(e, t.id)}
+          onclick={() => select(t.id)}>
           <span class="rdot" style:background={STATUS_VAR[t.status]}></span>
           <span class="mono rid">{t.id}</span>
           <span class="rtitle">{t.title}</span>
@@ -169,26 +167,21 @@
   </div>
 {:else}
   <div class="head">
-    <span></span><span>Node</span><span>Blocked by</span><span>Condition</span
-    ><span>Steps</span>
+    <span></span><span>Node</span><span>Blocked by</span><span>Condition</span><span>Steps</span>
     <span class="right">Status</span>
   </div>
 
   <div class="scroll">
     {#each wps as wp (wp.id)}
       {@const counts = wpCounts(app.nodes, wp.id)}
+      {@const tasks = visibleTasks(wp.id)}
       <div
         class="wp"
+        onclick={() => toggleWp(wp.id)}
+        oncontextmenu={(e) => openMenu(e, wp.id)}
         role="button"
         tabindex="0"
-        onclick={() => toggleWp(wp.id)}
-        onkeydown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            toggleWp(wp.id);
-          }
-        }}
-      >
+        onkeydown={(e) => e.key === 'Enter' && toggleWp(wp.id)}>
         <span class="caret">{app.expandedWp[wp.id] ? '▾' : '▸'}</span>
         <div class="wpname2">
           <span class="mono tag">WP</span>
@@ -196,29 +189,14 @@
           <span
             class="mono state"
             style:color={wp.state === 'ACTIVE' ? 'var(--ready)' : 'var(--fg2)'}
-            style:background={wp.state === 'ACTIVE'
-              ? 'var(--ready-bg)'
-              : 'var(--chip)'}>{wp.state}</span
-          >
+            style:background={wp.state === 'ACTIVE' ? 'var(--ready-bg)' : 'var(--chip)'}>{wp.state}</span>
         </div>
         <div class="wpbar">
           <div class="track">
-            <div
-              style:width="{pct(counts.done, counts.total)}%"
-              style:background="var(--done)"
-            ></div>
-            <div
-              style:width="{pct(counts.ready, counts.total)}%"
-              style:background="var(--ready)"
-            ></div>
-            <div
-              style:width="{pct(counts.blocked, counts.total)}%"
-              style:background="var(--blocked)"
-            ></div>
-            <div
-              style:width="{pct(counts.deferred, counts.total)}%"
-              style:background="var(--deferred)"
-            ></div>
+            <div style:width="{pct(counts.done, counts.total)}%" style:background="var(--done)"></div>
+            <div style:width="{pct(counts.ready, counts.total)}%" style:background="var(--ready)"></div>
+            <div style:width="{pct(counts.blocked, counts.total)}%" style:background="var(--blocked)"></div>
+            <div style:width="{pct(counts.deferred, counts.total)}%" style:background="var(--deferred)"></div>
           </div>
           <span class="mono ratio">{counts.done}/{counts.total}</span>
           <span class="mono pctcell">{counts.pct}%</span>
@@ -226,123 +204,120 @@
       </div>
 
       {#if app.expandedWp[wp.id]}
-        {#each tasksOf(app.nodes, wp.id).filter( (t) => passesFilter(t.status) ) as t (t.id)}
+        {#each tasks as t (t.id)}
           {@const ratio = stepRatio(app.nodes, t.id)}
           {@const badge = verifyBadge(t.verification)}
           {@const blockers = index.blockers.get(t.id) ?? []}
+          {@const steps = stepsOf(app.nodes, t.id)}
           <div
             class="row"
             class:selected={app.selectedId === t.id}
-            role="button"
-            tabindex="0"
             onclick={() => select(t.id)}
-            onkeydown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                select(t.id);
-              }
-            }}
-          >
+            oncontextmenu={(e) => openMenu(e, t.id)}
+            onkeydown={(e) => onRowKey(e, t)}
+            role="button"
+            tabindex="0">
             <span
               class="caret sub"
-              role="button"
-              tabindex="-1"
               onclick={(e) => {
                 e.stopPropagation();
                 toggleTask(t.id);
               }}
-              onkeydown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  toggleTask(t.id);
-                }
-              }}
-              >{stepsOf(app.nodes, t.id).length
-                ? app.expandedTask[t.id]
-                  ? '▾'
-                  : '▸'
-                : ''}</span
-            >
+              role="button"
+              tabindex="-1">{steps.length ? (app.expandedTask[t.id] ? '▾' : '▸') : ''}</span>
             <div class="node">
               <span class="dot" style:background={STATUS_VAR[t.status]}></span>
               <span class="mono nid">{t.id}</span>
-              <span
-                class="ellipsis"
-                style:color={t.status === 'DONE' ? 'var(--fg3)' : 'var(--fg)'}
-                >{t.title}</span
-              >
+              <span class="ellipsis" style:color={t.status === 'DONE' ? 'var(--fg3)' : 'var(--fg)'}>{t.title}</span>
             </div>
             <div class="blockers">
               {#each blockers as b}
                 {@const bn = index.byId.get(b)}
                 <span class="mono bchip">
-                  <span
-                    class="tinydot"
-                    style:background={bn ? STATUS_VAR[bn.status] : 'var(--fg3)'}
-                  ></span>{b}
+                  <span class="tinydot" style:background={bn ? STATUS_VAR[bn.status] : 'var(--fg3)'}></span>{b}
                 </span>
               {/each}
             </div>
             <div class="cond" title={badge.label}>
-              <span class="mono vglyph" style:color={badge.color}
-                >{badge.glyph}</span
-              >
+              <span class="mono vglyph" style:color={badge.color}>{badge.glyph}</span>
               <span class="mono ellipsis">{t.condition || '—'}</span>
             </div>
             <div class="steps">
               <div class="dots">
-                {#each stepsOf(app.nodes, t.id) as s (s.id)}
-                  <span
-                    class="sdot"
-                    style:background={s.status === 'DONE'
-                      ? 'var(--ready)'
-                      : 'var(--border)'}
-                  ></span>
+                {#each steps as s (s.id)}
+                  <span class="sdot" style:background={s.status === 'DONE' ? 'var(--ready)' : 'var(--border)'}></span>
                 {/each}
               </div>
               <span class="mono ratio">{ratio.label}</span>
             </div>
-            <span class="mono status" style:color={STATUS_VAR[t.status]}
-              >{t.status}</span
-            >
+            <div class="tail">
+              <span class="mono status" style:color={STATUS_VAR[t.status]}>{t.status}</span>
+              <button class="dots3" onclick={(e) => openMenu(e, t.id)} aria-label="Actions">⋯</button>
+            </div>
           </div>
 
-          {#if app.expandedTask[t.id]}
-            {#each stepsOf(app.nodes, t.id) as s (s.id)}
-              <div class="steprow">
+          {#if app.expandedTask[t.id] || app.showSteps}
+            {#each steps as s (s.id)}
+              <div
+                class="steprow"
+                onclick={() => select(s.id)}
+                oncontextmenu={(e) => openMenu(e, s.id)}
+                onkeydown={(e) => onRowKey(e, s)}
+                role="button"
+                tabindex="0">
                 <span></span>
                 <div class="stepname">
-                  <span class="mono sglyph" style:color={STATUS_VAR[s.status]}
-                    >{stepGlyph(s.status)}</span
-                  >
-                  <span
-                    class="ellipsis"
-                    style:color={s.status === 'DONE'
-                      ? 'var(--fg3)'
-                      : 'var(--fg2)'}>{s.title}</span
-                  >
+                  <span class="mono sglyph" style:color={STATUS_VAR[s.status]}>{stepGlyph(s.status)}</span>
+                  <span class="ellipsis" style:color={s.status === 'DONE' ? 'var(--fg3)' : 'var(--fg2)'}>{s.title}</span>
                 </div>
                 <span></span>
                 <span class="mono scond ellipsis">{s.condition || ''}</span>
                 <span></span>
-                <span class="mono sstatus">{s.status}</span>
+                <div class="tail">
+                  <span class="mono sstatus">{s.status}</span>
+                  <button class="dots3" onclick={(e) => openMenu(e, s.id)} aria-label="Actions">⋯</button>
+                </div>
               </div>
             {/each}
+            <div class="stepadd">
+              <InlineCreateRow
+                projectId={app.projectId}
+                parentId={t.id}
+                type="STEP"
+                label="Add a step…"
+                onEscalate={(title) => (app.dialog = { kind: 'create', nodeType: 'STEP', parentId: t.id, title })} />
+            </div>
           {/if}
         {/each}
+
+        {#if tasks.length === 0}
+          <div class="wpempty">
+            <span class="nonetask">No tasks in this package</span>
+          </div>
+        {/if}
+        <InlineCreateRow
+          projectId={app.projectId}
+          parentId={wp.id}
+          type="TASK"
+          variant={tasks.length === 0 ? 'prominent' : 'ghost'}
+          label={tasks.length === 0 ? 'Add the first task…' : `Add task to ${wp.title}`}
+          onEscalate={(title) => (app.dialog = { kind: 'create', nodeType: 'TASK', parentId: wp.id, title })} />
       {/if}
     {/each}
 
     {#if hidden > 0}
-      <button
-        class="archived"
-        onclick={() => (app.showArchived = !app.showArchived)}
-      >
+      <button class="archived" onclick={() => (app.showArchived = !app.showArchived)}>
         <span class="caret">{app.showArchived ? '▾' : '▸'}</span>
         {hidden} completed work {hidden === 1 ? 'package' : 'packages'}
         <span class="mono done">100%</span>
       </button>
     {/if}
+
+    <button
+      class="newwp"
+      onclick={() => (app.dialog = { kind: 'create', nodeType: 'WORK_PACKAGE', parentId: null, title: '' })}>
+      <span class="plus">+</span>New work package
+    </button>
   </div>
 {/if}
 
@@ -352,7 +327,7 @@
   .row,
   .steprow {
     display: grid;
-    grid-template-columns: 22px 1fr 190px 200px 74px 84px;
+    grid-template-columns: 22px 1fr 190px 200px 74px 104px;
     align-items: center;
     padding: 0 18px;
   }
@@ -526,15 +501,46 @@
     height: 5px;
     border-radius: 1px;
   }
+  .tail {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    justify-content: flex-end;
+  }
   .status {
-    text-align: right;
     font-size: 10px;
     letter-spacing: 0.04em;
+  }
+  .dots3 {
+    width: 20px;
+    height: 20px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--fg3);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    flex: none;
+  }
+  .row:hover .dots3,
+  .steprow:hover .dots3,
+  .dots3:focus {
+    opacity: 1;
+  }
+  .dots3:hover {
+    background: var(--panel2);
+    color: var(--fg);
   }
   .steprow {
     height: 31px;
     border-bottom: 1px solid var(--border2);
     background: var(--panel2);
+    cursor: pointer;
+  }
+  .steprow:hover {
+    background: var(--hover);
   }
   .stepname {
     display: flex;
@@ -554,11 +560,22 @@
     padding-right: 12px;
   }
   .sstatus {
-    text-align: right;
     font-size: 10px;
     color: var(--fg3);
   }
-  .archived {
+  .stepadd {
+    padding-left: 52px;
+    background: var(--panel2);
+  }
+  .wpempty {
+    padding: 14px 18px 4px;
+  }
+  .nonetask {
+    font-size: 12px;
+    color: var(--fg3);
+  }
+  .archived,
+  .newwp {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -573,6 +590,19 @@
     border-bottom: 1px solid var(--border2);
     cursor: pointer;
     text-align: left;
+  }
+  .archived:hover,
+  .newwp:hover {
+    color: var(--fg2);
+    background: var(--hover);
+  }
+  .newwp {
+    color: var(--accent);
+    border-bottom: 0;
+    height: 44px;
+  }
+  .plus {
+    font-size: 14px;
   }
   .done {
     color: var(--done);
@@ -677,12 +707,13 @@
     background: transparent;
     border: 0;
     padding: 0;
+    min-height: 44px;
     cursor: pointer;
     font-family: inherit;
     color: var(--fg);
   }
   .wpname {
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 600;
   }
   .wppct {

@@ -1,10 +1,14 @@
 <script lang="ts">
-  import { app, select } from '../lib/state.svelte';
+  import { app, select, passesAll } from '../lib/state.svelte';
+  import EmptyState from './EmptyState.svelte';
   import { buildIndex, hueOf, stepsOf } from '../lib/derive';
   import { ALL_STATUSES, STATUS_VAR, verifyBadge } from '../lib/types';
 
   const index = $derived(buildIndex(app.nodes, app.deps));
-  const tasks = $derived(app.nodes.filter((n) => n.type === 'TASK'));
+  const allTasks = $derived(app.nodes.filter((n) => n.type === 'TASK'));
+  const tasks = $derived(allTasks.filter(passesAll));
+  const emptyProject = $derived(app.nodes.filter((n) => n.type === 'WORK_PACKAGE').length === 0);
+  const filteredOut = $derived(!emptyProject && allTasks.length > 0 && tasks.length === 0);
   const mobile = $derived(app.width < 860);
   /** On mobile the lanes stack behind a swipeable tab strip — one at a time. */
   const shown = $derived(mobile ? [ALL_STATUSES[app.laneIndex]] : ALL_STATUSES);
@@ -23,6 +27,11 @@
   }
 </script>
 
+{#if emptyProject}
+  <EmptyState kind="project" />
+{:else if filteredOut}
+  <EmptyState kind="filtered" />
+{:else}
 {#if mobile}
   <div class="strip">
     {#each ALL_STATUSES as s, i}
@@ -58,6 +67,11 @@
             class="card"
             class:selected={app.selectedId === t.id}
             style:--hue={hue}
+            oncontextmenu={(e) => {
+              e.preventDefault();
+              app.menuAt = { x: Math.min(e.clientX, window.innerWidth - 250), y: e.clientY };
+              app.nodeMenuFor = t.id;
+            }}
             onclick={() => select(t.id)}>
             <div class="meta">
               <span class="mono id">{t.id}</span>
@@ -95,6 +109,7 @@
       <span class="pdot" class:on={i === app.laneIndex}></span>
     {/each}
   </div>
+{/if}
 {/if}
 
 <style>
@@ -291,5 +306,13 @@
   }
   .pdot.on {
     background: var(--accent);
+  }
+  @media (max-width: 860px) {
+    .tab {
+      min-height: 44px;
+    }
+    .card {
+      min-height: 64px;
+    }
   }
 </style>
