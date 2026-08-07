@@ -19,11 +19,29 @@ func wlen(s string) int {
 	return runewidth.StringWidth(stripANSI(s))
 }
 
+// Shared fixed-width columns for the tree view's right tail, so the
+// work-package step-ratio bar lines up under the task condition and the
+// step-percent under the task step-counter.
+const (
+	condW  = 22 // condition text column / WP step-ratio bar width
+	ratioW = 5  // task step-counter / WP step-percent column (e.g. "18/20", "90%")
+)
+
 func pad(s string, w int) string {
 	if wlen(s) >= w {
 		return s
 	}
 	return s + strings.Repeat(" ", w-wlen(s))
+}
+
+// padr right-aligns s within `w` cells (padding on the left). Used to line up
+// the WP step-percent with the task step-counter in the rightmost column so
+// both rows' numbers end at the same column.
+func padr(s string, w int) string {
+	if wlen(s) >= w {
+		return s
+	}
+	return strings.Repeat(" ", w-wlen(s)) + s
 }
 
 // treeRow lays out a tree line so the styled `right` tail is flush to the
@@ -152,9 +170,12 @@ func (m Model) viewTree(w, h int) string {
 			if rw.node.State == store.Active {
 				state = styles.Status(store.Ready).Render(string(rw.node.State))
 			}
-			bar := progressBar(cd, cr, cb, cdf, total, 14)
+			bar := progressBar(cd, cr, cb, cdf, total, condW)
 			prefix := styles.DimS.Render(caret) + " "
-			right := "  " + state + "  " + bar + " " + styles.DimS.Render(fmt.Sprintf("%d%%", pct))
+			// WP columns share the same fixed widths as the task row so the
+			// step-ratio bar lands under the task condition column and the
+			// step-percent under the task step-counter.
+			right := "  " + state + "  " + bar + " " + padr(fmt.Sprintf("%d%%", pct), ratioW)
 			line := treeRow(prefix, rw.node.Title, styles.BrightS.Render(rw.node.Title), right, inner)
 			body = append(body, line)
 			continue
@@ -175,8 +196,8 @@ func (m Model) viewTree(w, h int) string {
 			cond = cond[:22]
 		}
 		prefix := "  " + styles.Status(t.Status).Render("●") + " " + idS.Render(t.ID) + "  "
-		condS := styles.DimS.Render(pad(cond, 22))
-		ratioS := styles.DimS.Render(fmt.Sprintf("%d/%d", done, total))
+		condS := styles.DimS.Render(pad(cond, condW))
+		ratioS := padr(fmt.Sprintf("%d/%d", done, total), ratioW)
 		right := " " + styles.Status(bdg.Kind).Render(bdg.Glyph) + " " + condS + " " + ratioS
 		line := treeRow(prefix, t.Title, titleS.Render(t.Title), right, inner)
 		body = append(body, line)

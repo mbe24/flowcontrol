@@ -61,3 +61,45 @@ func TestTreeRightAlignment(t *testing.T) {
 			wpEdge, taskEdge)
 	}
 }
+
+// TestTreeBarConditionAlignment verifies that the work-package step-ratio bar
+// starts at the same column as the task condition text, so the bar visually
+// lines up under the conditions of the tasks below it.
+func TestTreeBarConditionAlignment(t *testing.T) {
+	m := loadModel(t)
+	m.screen = ScreenTree
+	m.width, m.height = 100, 40
+
+	lines := strings.Split(m.View(), "\n")
+	var barStart, condStart int
+
+	for _, ln := range lines {
+		if !strings.HasPrefix(ln, "│") || !strings.HasSuffix(ln, "│") {
+			continue
+		}
+		plain := stripANSI(ln)
+		if strings.Contains(plain, "█") && strings.Contains(plain, "%") {
+			barStart = wlen(plain[:strings.Index(plain, "█")])
+		} else if strings.Contains(plain, "T-") && strings.Contains(plain, "/") {
+			// The ratio is the rightmost field (ratioW cells wide) and is
+			// preceded by one space then the condition field (condW cells
+			// wide), all right-aligned. Derive the condition's start column
+			// from the row's right edge so the assertion is independent of the
+			// (ambiguous) glyph markers — task IDs like "T-1043" and condition
+			// text like "--grep" both contain dashes.
+			edge := contentRightEdge(plain)
+			ratioBegin := edge - ratioW + 1
+			condStart = ratioBegin - 1 - condW
+		}
+	}
+	if barStart == 0 {
+		t.Fatalf("no WP bar found; view:\n%s", m.View())
+	}
+	if condStart == 0 {
+		t.Fatalf("no task condition found; view:\n%s", m.View())
+	}
+	if barStart != condStart {
+		t.Errorf("WP step-ratio bar starts at col %d but task condition starts at col %d; they should align",
+			barStart, condStart)
+	}
+}
