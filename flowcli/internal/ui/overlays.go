@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	lv2 "charm.land/lipgloss/v2"
+
 	"flowcli/internal/store"
 	"flowcli/internal/styles"
 )
@@ -45,6 +47,30 @@ func box(title, titleColour string, lines []string, w int) string {
 	}
 	b.WriteString(accent.Render("└" + strings.Repeat("─", inner+2) + "┘"))
 	return b.String()
+}
+
+// overlay positions a dialog box as a modal centred over the full-screen main
+// view using lipgloss v2's cell-based compositor. The main view is added as a
+// background layer (opaque where it has content) and the dialog as a
+// transparent foreground layer on top, so the underlying view stays fully
+// visible around the dialog instead of being blanked out.
+func overlay(main, ov string, w, h int) string {
+	ovLines := strings.Split(strings.TrimRight(ov, "\n"), "\n")
+	ovW := 0
+	for _, l := range ovLines {
+		if v := wlen(l); v > ovW {
+			ovW = v
+		}
+	}
+	ovH := len(ovLines)
+
+	x := max((w-ovW)/2, 0)
+	y := max((h-ovH)/2, 0)
+
+	bg := lv2.NewLayer(main).X(0).Y(0).Z(0)
+	dlg := lv2.NewLayer(ov).X(x).Y(y).Z(1)
+	comp := lv2.NewCompositor(bg, dlg)
+	return comp.Render()
 }
 
 func (m Model) viewOverlay(w int) string {

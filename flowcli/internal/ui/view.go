@@ -118,7 +118,7 @@ func (m Model) View() string {
 	}
 
 	if ov := m.viewOverlay(w); ov != "" {
-		return main + "\n" + ov
+		return overlay(main, ov, w, h)
 	}
 	if m.flash != "" {
 		return main + "\n " + styles.DimS.Render(m.flash)
