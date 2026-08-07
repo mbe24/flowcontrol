@@ -77,7 +77,16 @@ func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case ScreenActivity:
 			m.screen = ScreenDetail
 		case ScreenDetail:
-			m.screen = m.prevScreen
+			if m.fromFinder {
+				// return to the finder with the same query, selection intact
+				m.fromFinder = false
+				m.overlay = OverlayFinder
+				m.input.Placeholder = "task, step or command"
+				m.input.Focus()
+				m.screen = m.prevScreen
+			} else {
+				m.screen = m.prevScreen
+			}
 		}
 		return m, nil
 
@@ -358,6 +367,9 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.selectedID = m.ownerTask(m.finderHits[m.finderIdx]).ID
 				m.screen = ScreenDetail
 				m.stepCursor = 0
+				// remember the finder so ESC in the detail returns to it with
+				// the same query intact
+				m.fromFinder = true
 			}
 			return m, nil
 		}

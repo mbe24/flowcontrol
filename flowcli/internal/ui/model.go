@@ -120,6 +120,7 @@ type Model struct {
 	finderHits  []store.Node
 	finderIdx   int
 	finderScroll int
+	fromFinder  bool
 	statusIdx   int
 	projectIdx  int
 	confirmID   string

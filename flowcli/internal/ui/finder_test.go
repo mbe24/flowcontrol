@@ -88,3 +88,73 @@ func TestFinderScrollKeepsSelection(t *testing.T) {
 		t.Fatalf("moving up to top: scroll=%d want 0", m.finderScroll)
 	}
 }
+
+// Opening a task from the finder and pressing ESC must return to the finder
+// with the same search query intact, so the user can continue browsing.
+func TestFinderEscReturnsToFinder(t *testing.T) {
+	m := loadModel(t)
+	m.screen = ScreenTree
+	m.cursor = 0
+	m.selectedID = ""
+	if len(m.rows) == 0 {
+		t.Skip("no tree rows in fixture")
+	}
+
+	// open the finder from the tree with a query
+	m = press(t, m, "/")
+	m = press(t, m, "t")
+	if m.overlay != OverlayFinder {
+		t.Fatalf("expected finder overlay, got %v", m.overlay)
+	}
+	q := m.input.Value()
+	if q == "" || len(m.finderHits) == 0 {
+		t.Skip("query 't' produced no finder hits in fixture")
+	}
+
+	// open the selected task from the finder
+	selBefore := m.finderIdx
+	m = press(t, m, "enter")
+	if m.screen != ScreenDetail {
+		t.Fatalf("after enter from finder: expected detail, got %v", m.screen)
+	}
+
+	// ESC must return to the finder, not the tree
+	m = press(t, m, "esc")
+	if m.screen == ScreenDetail {
+		t.Fatalf("after esc: still in detail")
+	}
+	if m.overlay != OverlayFinder {
+		t.Fatalf("after esc: expected finder overlay, got %v", m.overlay)
+	}
+	if m.input.Value() != q {
+		t.Errorf("after esc: query changed, got %q want %q", m.input.Value(), q)
+	}
+	if m.finderIdx != selBefore {
+		t.Errorf("after esc: selection changed, got idx=%d want %d", m.finderIdx, selBefore)
+	}
+}
+
+// Opening a task from the tree (not the finder) and pressing ESC must return to
+// the tree, not reopen any finder.
+func TestFinderNotOpenedFromNormalEnter(t *testing.T) {
+	m := loadModel(t)
+	m.screen = ScreenTree
+	m.cursor = 0
+	m.selectedID = ""
+	if len(m.rows) == 0 {
+		t.Skip("no tree rows in fixture")
+	}
+	m.selectedID = m.ownerTask(m.rows[0].node).ID
+
+	m = press(t, m, "enter")
+	if m.screen != ScreenDetail {
+		t.Fatalf("expected detail, got %v", m.screen)
+	}
+	m = press(t, m, "esc")
+	if m.overlay != OverlayNone {
+		t.Errorf("after esc from normal detail: expected no overlay, got %v", m.overlay)
+	}
+	if m.screen != ScreenTree {
+		t.Errorf("after esc from normal detail: expected tree, got %v", m.screen)
+	}
+}
