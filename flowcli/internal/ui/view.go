@@ -28,6 +28,19 @@ func pad(s string, w int) string {
 	return s + strings.Repeat(" ", w-wlen(s))
 }
 
+// treeRow lays out a tree line so the styled `right` tail is flush to the
+// right edge of the frame (inner cells wide). `prefix` is styled text;
+// `titlePlain` is the unstyled title and `titleStyled` its styled version.
+// The title is padded/truncated so prefix + title + right exactly fills inner
+// cells, keeping the right tail right-aligned on every row.
+func treeRow(prefix, titlePlain, titleStyled, right string, inner int) string {
+	tw := inner - wlen(prefix) - wlen(right)
+	if tw < 1 {
+		tw = 1
+	}
+	return prefix + cell(titlePlain, titleStyled, tw) + right
+}
+
 // frame draws the terminal box: ┌─ title ─┐ … ├─┤ keys └─┘.
 // Every row is padded to `inner` so the right wall closes.
 func frame(title string, body []string, keys string, inner, height int) string {
@@ -142,8 +155,9 @@ func (m Model) viewTree(w, h int) string {
 				state = styles.Status(store.Ready).Render(string(rw.node.State))
 			}
 			bar := progressBar(cd, cr, cb, cdf, total, 14)
-			line := styles.DimS.Render(caret) + " " + styles.BrightS.Render(rw.node.Title) + "  " + state + "  " + bar +
-				styles.DimS.Render(fmt.Sprintf(" %d%%", pct))
+			prefix := styles.DimS.Render(caret) + " "
+			right := "  " + state + "  " + bar + " " + styles.DimS.Render(fmt.Sprintf("%d%%", pct))
+			line := treeRow(prefix, rw.node.Title, styles.BrightS.Render(rw.node.Title), right, inner)
 			body = append(body, line)
 			continue
 		}
@@ -162,11 +176,11 @@ func (m Model) viewTree(w, h int) string {
 		if len(cond) > 22 {
 			cond = cond[:22]
 		}
-		line := "  " + styles.Status(t.Status).Render("●") + " " + idS.Render(t.ID) + "  " +
-			titleS.Render(padTrunc(t.Title, max(inner-52, 10))) + " " +
-			styles.Status(bdg.Kind).Render(bdg.Glyph) + " " +
-			styles.DimS.Render(padTrunc(cond, 22)) + " " +
-			styles.DimS.Render(fmt.Sprintf("%d/%d", done, total))
+		prefix := "  " + styles.Status(t.Status).Render("●") + " " + idS.Render(t.ID) + "  "
+		condS := styles.DimS.Render(pad(cond, 22))
+		ratioS := styles.DimS.Render(fmt.Sprintf("%d/%d", done, total))
+		right := " " + styles.Status(bdg.Kind).Render(bdg.Glyph) + " " + condS + " " + ratioS
+		line := treeRow(prefix, t.Title, titleS.Render(t.Title), right, inner)
 		body = append(body, line)
 
 		if bl := m.blockers[t.ID]; len(bl) > 0 && t.Status == store.Blocked {
