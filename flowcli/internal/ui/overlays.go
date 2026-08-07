@@ -29,7 +29,12 @@ func box(title, titleColour string, lines []string, w int) string {
 
 	var b strings.Builder
 	head := "┌─ " + title + " "
-	b.WriteString(accent.Render(head+strings.Repeat("─", max(inner+2-len(head)-1+2, 0))+"┐") + "\n")
+	// the header line must match the body width (inner+4: wall + space +
+	// content + space + wall). `len` counts bytes and box glyphs are
+	// multibyte, so compute dashes from the display width wlen(head); the
+	// "+1" accounts for the ┐ corner.
+	dashes := max(inner+4-wlen(head)-1, 0)
+	b.WriteString(accent.Render(head+strings.Repeat("─", dashes)+"┐") + "\n")
 	wall := styles.DimS.Render("│")
 	for _, l := range lines {
 		fill := inner - len([]rune(stripANSI(l)))
