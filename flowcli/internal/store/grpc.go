@@ -31,7 +31,14 @@ type GRPC struct {
 // NewGRPC wraps an open gRPC connection (client side) as a Store. `who` is the
 // author name attached to every write (humans and agents get the same byline).
 func NewGRPC(conn *grpc.ClientConn, who string) *GRPC {
-	return &GRPC{c: flowv1.NewFlowServiceClient(conn), who: who}
+	return NewGRPCWithClient(flowv1.NewFlowServiceClient(conn), who)
+}
+
+// NewGRPCWithClient builds a Store backed by a supplied FlowServiceClient.
+// This is the seam tests use to inject a fake/mock client; NewGRPC is a thin
+// wrapper that constructs the real client from a connection.
+func NewGRPCWithClient(client flowv1.FlowServiceClient, who string) *GRPC {
+	return &GRPC{c: client, who: who}
 }
 
 func (g *GRPC) Projects(ctx context.Context) ([]Project, error) {
