@@ -2,6 +2,7 @@
   import { app, addDependency, moveNode } from '../lib/state.svelte';
   import { buildIndex, stepsOf, tasksOf, workPackages } from '../lib/derive';
   import type { NodeType } from '../lib/types';
+  import SearchPick from './SearchPick.svelte';
 
   interface Props {
     nodeId: string;
@@ -77,14 +78,17 @@
           {promoting ? 'Becomes a task in' : demoting ? 'Becomes a step of' : 'Move to'}
         </span>
         {#if targets.length}
-          <div class="selwrap">
-            <select bind:value={target}>
-              {#each targets as t (t.id)}
-                <option value={t.id}>{t.type === 'TASK' ? `${t.id} · ` : ''}{t.title}</option>
-              {/each}
-            </select>
-            {#if targetBlocksIt}<span class="mono flag">blocks it</span>{/if}
-          </div>
+          <SearchPick
+            items={targets.map((t) => ({
+              id: t.id,
+              title: t.title,
+              showId: t.type === 'TASK'
+            }))}
+            value={target}
+            onchange={(id) => (target = id)}
+            flag={targetBlocksIt ? 'blocks it' : ''}
+            placeholder={demoting ? 'Search task…' : 'Search work package…'}
+          />
         {:else}
           <span class="fine">Nowhere to move this — there is no other {demoting ? 'task in this package' : 'work package'}.</span>
         {/if}
@@ -190,28 +194,6 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-  }
-  .selwrap {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 9px;
-  }
-  select {
-    flex: 1;
-    padding: 10px 11px;
-    border-radius: 8px;
-    background: var(--panel2);
-    border: 1px solid var(--accent);
-    color: var(--fg);
-    font-family: inherit;
-    font-size: 13px;
-    outline: none;
-  }
-  .flag {
-    font-size: 10px;
-    color: var(--accent);
-    flex: none;
   }
   .check {
     display: flex;
@@ -325,10 +307,6 @@
       overflow: auto;
       border-radius: 16px 16px 0 0;
       padding: 20px 16px calc(16px + env(safe-area-inset-bottom));
-    }
-    select {
-      min-height: 44px;
-      font-size: 16px;
     }
     .ghost,
     .primary {

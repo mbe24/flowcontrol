@@ -160,7 +160,7 @@
                       parentQuery = '';
                       parentOpen = false;
                     }}>
-                    {#if p.type === 'TASK'}<span class="mono">{p.id} · </span>{/if}
+                    {#if p.type === 'TASK'}<span class="mono">{p.id} ·&#160;</span>{/if}
                     <span class="title">{p.title}</span>
                   </button>
                 {/each}
