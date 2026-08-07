@@ -93,8 +93,8 @@ func (m Model) View() string {
 		return "\n  loading…\n"
 	}
 
-	w := min(m.width-2, 200)
-	h := m.height - 2
+	w := m.width
+	h := m.height
 	if h < 12 {
 		h = 12
 	}

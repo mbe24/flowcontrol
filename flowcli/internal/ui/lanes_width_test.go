@@ -23,13 +23,9 @@ func TestLanesFillWidth(t *testing.T) {
 			first := strings.Split(view, "\n")[0]
 			got := runewidth.StringWidth(stripANSI(first))
 
-			// All other views render frame width == w. View() caps even the
-			// frame width at 200 (w = min(termW-2, 200)), so the lane view must
-			// match that same value — no more early/missing margin.
-			want := termW - 2
-			if want > 200 {
-				want = 200
-			}
+			// All other views render frame width == w = termW (no margins, no
+			// width cap), so the lane view must match that same value.
+			want := termW
 			if got != want {
 				t.Errorf("term width %d: lane frame width = %d, want %d (full width); top border %q",
 					termW, got, want, first)
