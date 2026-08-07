@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 
+	"github.com/charmbracelet/bubbles/help"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
 
@@ -87,6 +88,8 @@ type Model struct {
 	err     error
 	flash   string
 
+	help help.Model
+
 	// prevScreen is the view we came from into an overlay detail, so ESC
 	// returns to it instead of always falling back to the tree. Updated every
 	// time we enter detail.
@@ -143,6 +146,7 @@ func New(s store.Store) Model {
 		collapsed: map[string]bool{},
 		openSteps: map[string]bool{},
 		input:     ti,
+		help:      help.New(),
 		width:     120,
 		height:    40,
 	}

@@ -11,8 +11,6 @@ import (
 	"flowcli/internal/styles"
 )
 
-func key(s string) string { return styles.AccentS.Render(s) }
-
 // wlen returns the display width (in terminal cells) of a string, counting
 // multibyte glyphs like box corners and check marks as a single cell. Go's
 // len() counts bytes, which misaligns the frame; this is the correct measure.
@@ -198,8 +196,7 @@ func (m Model) viewTree(w, h int) string {
 		body = append(body, styles.DimS.Render(fmt.Sprintf("▸ %d completed work packages", hidden)))
 	}
 
-	keys := key("j/k") + " move  " + key("h/l") + " fold  " + key("ret") + " detail  " +
-		key("2") + " lanes  " + key("3") + " chain  " + key("/") + " find  " + key("s") + " status"
+	keys := m.statusLine(treeKeys(), m.screen, inner)
 	title := "flowcli ─ " + m.projectName()
 	return frame(title, body, keys, inner, h)
 }
@@ -233,7 +230,7 @@ func (m Model) viewDetail(w, h int) string {
 		box := "[" + b.Glyph + "]"
 		line := styles.Status(b.Kind).Render(box+" "+b.Label) + "   " + styles.DimS.Render(b.Detail)
 		body = append(body, line)
-		body = append(body, styles.DimS.Render("fctrl never runs conditions. The agent reports; you accept.  "+key("v")+" toggle"))
+		body = append(body, styles.DimS.Render("fctrl never runs conditions. The agent reports; you accept.  "+styles.AccentS.Render("v")+" toggle"))
 		body = append(body, "")
 	}
 
@@ -283,8 +280,7 @@ func (m Model) viewDetail(w, h int) string {
 		}
 	}
 
-	keys := key("s") + " status  " + key("v") + " verify flag  " + key("tab") + " expand step  " +
-		key("a") + " activity  " + key("esc") + " back"
+	keys := m.statusLine(detailKeys(), m.screen, inner)
 	title := node.ID + " ─ " + node.Title
 	return frame(title, body, keys, inner, h)
 }
@@ -337,7 +333,7 @@ func (m Model) viewActivity(w, h int) string {
 	body = append(body, "")
 	body = append(body, styles.AccentS.Render("› ")+styles.DimS.Render("i to leave a note"))
 
-	keys := key("i") + " write  " + key("j/k") + " scroll  " + key("esc") + " back to detail"
+	keys := m.statusLine(activityKeys(), m.screen, inner)
 	return frame("activity ─ "+node.ID+" "+node.Title, body, keys, inner, h)
 }
 

@@ -262,8 +262,7 @@ func (m Model) viewChain(w, h int) string {
 	}
 	body = append(body, "")
 
-	keys := key("j/k") + " move  " + key("f") + " focus  " + key("w") + " next package  " +
-		key("ret") + " detail  " + key("1") + " tree"
+	keys := m.statusLine(chainKeys(), m.screen, inner)
 	return frame(title, body, keys, inner, h)
 }
 

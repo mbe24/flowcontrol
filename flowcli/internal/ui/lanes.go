@@ -288,10 +288,9 @@ func (m Model) viewLanes(w, h int) string {
 		body = append(body, line.String())
 	}
 
-	keys := key("h/l") + " lane  " + key("j/k") + " card  " + key("ret") + " detail  " +
-		key("s") + " status  " + key("1") + " tree  " + key("3") + " chain"
+	keys := m.statusLine(lanesKeys(), m.screen, inner)
 	if len(lanes) == 1 {
-		keys = key("tab") + " lane  " + key("j/k") + " card  " + key("ret") + " detail  " + key("s") + " status"
+		keys = m.statusLine(lanesKeys(), m.screen, inner)
 		dots := make([]string, 4)
 		for i := range dots {
 			if i == m.lane {
