@@ -102,26 +102,51 @@ func (m Model) viewOverlay(w int) string {
 		return box("leave a note", "", lines, w)
 
 	case OverlayFinder:
-		lines := []string{m.input.View(), styles.DimS.Render(strings.Repeat("─", 46))}
+		lines := []string{pad(m.input.View(), finderInner)}
+		lines = append(lines, styles.DimS.Render(strings.Repeat("─", finderInner)))
+		// The dialog is fixed-height: always render finderVisible result rows
+		// (hint + padded empties when there are no/too few matches), each
+		// padded to finderInner so the box width is constant too.
+		rows := make([]string, finderVisible)
 		if len(m.finderHits) == 0 {
-			lines = append(lines, styles.DimS.Render("  search tasks and steps — try \"rotate\""))
-		}
-		for i, n := range m.finderHits {
-			marker := "  "
-			titleS := styles.FgS
-			if i == m.finderIdx {
-				marker = styles.AccentS.Render("▸ ")
-				titleS = styles.BrightS
+			rows[0] = pad(styles.DimS.Render("  search tasks and steps — try \"rotate\""), finderInner)
+		} else {
+			// show a fixed-size window of hits; finderScroll tracks the first
+			// visible row so the dialog keeps a constant height regardless of
+			// how many results match.
+			visStart := m.finderScroll
+			if visStart > len(m.finderHits) {
+				visStart = len(m.finderHits)
 			}
-			kind := "●"
-			if n.Type == store.Step {
-				kind = styles.StepGlyph(n.Status)
+			visEnd := visStart + finderVisible
+			if visEnd > len(m.finderHits) {
+				visEnd = len(m.finderHits)
 			}
-			lines = append(lines, marker+styles.Status(n.Status).Render(kind)+" "+
-				styles.DimS.Render(padTrunc(n.ID, 9))+" "+titleS.Render(padTrunc(n.Title, 42)))
+			for k, i := 0, visStart; i < visEnd; i, k = i+1, k+1 {
+				n := m.finderHits[i]
+				marker := "  "
+				titleS := styles.FgS
+				if i == m.finderIdx {
+					marker = styles.AccentS.Render("▸ ")
+					titleS = styles.BrightS
+				}
+				kind := "●"
+				if n.Type == store.Step {
+					kind = styles.StepGlyph(n.Status)
+				}
+				row := marker + styles.Status(n.Status).Render(kind)+" "+
+					styles.DimS.Render(padTrunc(n.ID, 9))+" "+titleS.Render(padTrunc(n.Title, 30))
+				rows[k] = pad(row, finderInner)
+			}
 		}
-		lines = append(lines, styles.DimS.Render(strings.Repeat("─", 46)),
-			styles.DimS.Render(fmt.Sprintf("  %d results   ↑↓ move   ret open   esc close", len(m.finderHits))))
+		lines = append(lines, rows...)
+		sc := ""
+		if len(m.finderHits) > finderVisible {
+			sc = "  " + styles.DimS.Render(fmt.Sprintf("(%d/%d)", m.finderIdx+1, len(m.finderHits)))
+		}
+		foot := "  ↑↓ move   ret open   esc close" + sc
+		lines = append(lines, styles.DimS.Render(strings.Repeat("─", finderInner)),
+			pad(styles.DimS.Render(foot), finderInner))
 		return box("find", "", lines, w)
 	}
 	return ""

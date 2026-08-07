@@ -334,10 +334,22 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.Blur()
 			return m, nil
 		case "down", "ctrl+n":
-			m.finderIdx = min(m.finderIdx+1, max(len(m.finderHits)-1, 0))
+			n := max(len(m.finderHits)-1, 0)
+			if m.finderIdx < n {
+				m.finderIdx++
+			}
+			// keep selection within the visible window
+			if m.finderIdx >= m.finderScroll+finderVisible {
+				m.finderScroll = m.finderIdx - finderVisible + 1
+			}
 			return m, nil
 		case "up", "ctrl+p":
-			m.finderIdx = max(m.finderIdx-1, 0)
+			if m.finderIdx > 0 {
+				m.finderIdx--
+			}
+			if m.finderIdx < m.finderScroll {
+				m.finderScroll = m.finderIdx
+			}
 			return m, nil
 		case "enter":
 			m.overlay = OverlayNone
@@ -353,6 +365,7 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input, cmd = m.input.Update(msg)
 		m.finderHits = m.search(m.input.Value())
 		m.finderIdx = 0
+		m.finderScroll = 0
 		return m, cmd
 	}
 	return m, nil

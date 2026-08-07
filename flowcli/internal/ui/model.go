@@ -39,6 +39,15 @@ const (
 	OneLaneMin  = 44
 )
 
+// finderVisible is the number of result rows shown in the fixed-height find
+// dialog; extra results are reached by scrolling.
+const finderVisible = 6
+
+// finderInner is the fixed content width of the find dialog. Every line is
+// padded/truncated to this many cells so the dialog keeps a constant size
+// regardless of how many or how long the results are.
+const finderInner = 56
+
 type loadedMsg struct {
 	nodes    []store.Node
 	deps     []store.Dependency
@@ -110,6 +119,7 @@ type Model struct {
 	input       textinput.Model
 	finderHits  []store.Node
 	finderIdx   int
+	finderScroll int
 	statusIdx   int
 	projectIdx  int
 	confirmID   string
