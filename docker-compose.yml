@@ -25,11 +25,12 @@ services:
       - cargo-watch
       - --poll
       - -x
-      # --addr 0.0.0.0: the container must accept traffic the docker-proxy
-      # forwards on the bridge; native use keeps the code's 127.0.0.1 default.
-      - "run -- serve --addr 0.0.0.0:50051 --db :memory: --seed"
+      # FLOWD_PORT comes from the repo-root .env; --addr 0.0.0.0 lets the
+      # container accept traffic the docker-proxy forwards (loopback only in
+      # native use). No .env present -> 50051.
+      - "run -- serve --addr 0.0.0.0:${FLOWD_PORT:-50051} --db :memory: --seed"
     ports:
-      - "50051:50051"
+      - "${FLOWD_PORT:-50051}:${FLOWD_PORT:-50051}"
     volumes:
       - type: bind
         source: .

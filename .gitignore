@@ -1,1 +1,6 @@
 plan/
+
+# Local env files (commit the .example, never the values)
+.env
+.env.*
+!.env.example
