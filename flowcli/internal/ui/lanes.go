@@ -23,15 +23,40 @@ func (m Model) laneSet() []store.Status {
 	}
 }
 
-func (m Model) laneWidth() (laneW, gutter int) {
+// laneGutter returns the spacing between lanes for the chosen lane set.
+func (m Model) laneGutter() int {
 	switch len(m.laneSet()) {
 	case 4:
-		return 22, 2
-	case 2:
-		return 30, 3
+		return 2
 	default:
-		return min(m.width-6, 34), 0
+		return 3
 	}
+}
+
+// laneWidths distributes the frame's full inner width across the lanes so the
+// lane view fills the terminal edge-to-edge, exactly like every other view.
+// Unlike the old fixed 22/30 per-lane caps, lanes here stretch to the
+// available width (with the remainder spread over the last few lanes), so the
+// right wall reaches the terminal edge instead of leaving a black margin.
+func (m Model) laneWidths(lanes []store.Status, gutter, inner int) []int {
+	n := len(lanes)
+	usable := inner - (n-1)*gutter
+	if usable < n {
+		usable = n
+	}
+	base := usable / n
+	rem := usable % n
+	widths := make([]int, n)
+	for i := 0; i < n; i++ {
+		widths[i] = base
+		if i >= n-rem {
+			widths[i]++
+		}
+		if widths[i] < 1 {
+			widths[i] = 1
+		}
+	}
+	return widths
 }
 
 func (m Model) laneTasks(s store.Status) []store.Node {
@@ -97,13 +122,15 @@ func cell(plain, rendered string, w int) string {
 
 func (m Model) viewLanes(w, h int) string {
 	lanes := m.laneSet()
-	laneW, gutter := m.laneWidth()
-	inner := len(lanes)*laneW + (len(lanes)-1)*gutter
+	gutter := m.laneGutter()
+	inner := w - 4
+	widths := m.laneWidths(lanes, gutter, inner)
 
 	type cardLine struct{ plain, rendered string }
 	built := make([][]cardLine, len(lanes))
 
 	for li, st := range lanes {
+		laneW := widths[li]
 		tasks := m.laneTasks(st)
 		cur := m.laneCursor[li]
 		var col []cardLine
@@ -175,8 +202,8 @@ func (m Model) viewLanes(w, h int) string {
 			hr.WriteString(strings.Repeat(" ", gutter))
 		}
 		label := fmt.Sprintf("● %s %d", st, len(m.laneTasks(st)))
-		hp.WriteString(padTrunc(label, laneW))
-		hr.WriteString(cell(label, styles.Status(st).Render(label), laneW))
+		hp.WriteString(padTrunc(label, widths[i]))
+		hr.WriteString(cell(label, styles.Status(st).Render(label), widths[i]))
 	}
 	body = append(body, hr.String())
 
@@ -186,8 +213,8 @@ func (m Model) viewLanes(w, h int) string {
 			rp.WriteString(strings.Repeat(" ", gutter))
 			rr.WriteString(strings.Repeat(" ", gutter))
 		}
-		rule := strings.Repeat("─", min(laneW-2, wlen(string(st))+4))
-		rr.WriteString(cell(rule, styles.Status(st).Render(rule), laneW))
+		rule := strings.Repeat("─", min(widths[i]-2, wlen(string(st))+4))
+		rr.WriteString(cell(rule, styles.Status(st).Render(rule), widths[i]))
 	}
 	body = append(body, rr.String())
 
@@ -207,7 +234,7 @@ func (m Model) viewLanes(w, h int) string {
 			if r < len(built[i]) {
 				cl = built[i][r]
 			}
-			line.WriteString(cell(cl.plain, cl.rendered, laneW))
+			line.WriteString(cell(cl.plain, cl.rendered, widths[i]))
 		}
 		body = append(body, line.String())
 	}
