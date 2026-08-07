@@ -4,3 +4,6 @@ plan/
 .env
 .env.*
 !.env.example
+
+# npm workspace root
+node_modules/

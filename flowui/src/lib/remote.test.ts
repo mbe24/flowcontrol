@@ -17,8 +17,8 @@ import {
   HumanVerdict as PbVerdict,
   NodeKind as PbKind,
   WorkPackageState as PbWpState
-} from '../generated/flow/v1/flow_pb';
-import type { Event as PbEvent, Node as PbNode, Project as PbProject } from '../generated/flow/v1/flow_pb';
+} from '@flow/api/flow/v1/flow_pb';
+import type { Event as PbEvent, Node as PbNode, Project as PbProject } from '@flow/api/flow/v1/flow_pb';
 
 const pbNode = (over: Partial<PbNode> = {}): PbNode =>
   ({

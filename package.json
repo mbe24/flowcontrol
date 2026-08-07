@@ -1,0 +1,11 @@
+{
+  "name": "flowcontrol",
+  "private": true,
+  "version": "0.1.0",
+  "description": "FlowControl - a multi-language task graph ecosystem. npm workspace for the TypeScript clients.",
+  "workspaces": [
+    "flowui",
+    "flowmcp",
+    "shared/flowapi"
+  ]
+}

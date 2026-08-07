@@ -20,9 +20,9 @@ plugins:
   - remote: buf.build/community/neoeinstein-tonic:v0.4.0
     out: ../flowd/src/generated
 
-  # TypeScript (flowui): single shared output under the web app.
-  # flowmcp can reference the same bindings once it exists.
+  # TypeScript: shared @flow/api generated once under shared/flowapi, imported
+  # by flowui and flowmcp via the npm workspace.
   - remote: buf.build/bufbuild/es:v2.2.3
-    out: ../flowui/src/generated
+    out: ../shared/flowapi
   - remote: buf.build/connectrpc/es:v1.6.1
-    out: ../flowui/src/generated
+    out: ../shared/flowapi

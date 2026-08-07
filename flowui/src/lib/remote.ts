@@ -33,8 +33,7 @@ import {
   type Event as PbEvent,
   type Node as PbNode,
   type Project as PbProject
-} from '../generated/flow/v1/flow_pb';
-
+} from '@flow/api/flow/v1/flow_pb';
 /** Who writes from the web app. Plain name, agents get no special treatment. */
 const AUTHOR = 'you';
 

@@ -1,0 +1,10 @@
+{
+  "name": "@flow/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Generated FlowControl v1 gRPC/Connect TypeScript bindings (shared by flowui and flowmcp).",
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.13.0"
+  }
+}
