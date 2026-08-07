@@ -30,6 +30,7 @@ const (
 	OverlayStatus
 	OverlayConfirm
 	OverlayComment
+	OverlayHelp
 )
 
 // Lane layout thresholds, derived from the drawn card widths:

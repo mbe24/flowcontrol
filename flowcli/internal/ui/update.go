@@ -58,6 +58,10 @@ func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = ScreenChain
 		return m, nil
 
+	case "?":
+		m.overlay = OverlayHelp
+		return m, nil
+
 	case "/":
 		m.overlay = OverlayFinder
 		m.prevScreen = m.screen
@@ -266,6 +270,13 @@ func (m Model) updateActivity(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.overlay {
+	case OverlayHelp:
+		switch msg.String() {
+		case "esc", "?", "q":
+			m.overlay = OverlayNone
+		}
+		return m, nil
+
 	case OverlayConfirm:
 		switch msg.String() {
 		case "y":

@@ -140,9 +140,9 @@ func switcher(active Screen) string {
 		}
 		return styles.BrightS.Render(label + name)
 	}
-	return seg("3 ", "chain", active == ScreenChain) + "  " +
+	return seg("1 ", "tree", active == ScreenTree) + "  " +
 		seg("2 ", "lanes", active == ScreenLanes) + "  " +
-		seg("1 ", "tree", active == ScreenTree)
+		seg("3 ", "chain", active == ScreenChain)
 }
 
 // statusLine builds the single status/help row for `active` screen: the short
@@ -163,4 +163,21 @@ func (m Model) statusLine(km screenKeys, active Screen, inner int) string {
 		fill = 0
 	}
 	return left + strings.Repeat(" ", fill) + " " + right
+}
+
+// kmForScreen returns the key map for the given screen, used both for the
+// status-line short help and the full "?" help dialog.
+func kmForScreen(s Screen) screenKeys {
+	switch s {
+	case ScreenLanes:
+		return lanesKeys()
+	case ScreenChain:
+		return chainKeys()
+	case ScreenDetail:
+		return detailKeys()
+	case ScreenActivity:
+		return activityKeys()
+	default:
+		return treeKeys()
+	}
 }

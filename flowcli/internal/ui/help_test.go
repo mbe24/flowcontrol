@@ -31,17 +31,48 @@ func TestStatusLineWidth(t *testing.T) {
 }
 
 // TestStatusLineViewSwitcher checks that all three view-switch hints are always
-// present and that the active one is dimmed while the others are bright.
+// present, in ascending order (1, 2, 3), and that the active one is dimmed
+// while the others are bright.
 func TestStatusLineViewSwitcher(t *testing.T) {
 	for _, active := range []Screen{ScreenTree, ScreenLanes, ScreenChain} {
 		tail := switcher(active)
+		plain := stripANSI(tail)
+		// order: 1 tree ... 2 lanes ... 3 chain
+		one := strings.Index(plain, "1 tree")
+		two := strings.Index(plain, "2 lanes")
+		three := strings.Index(plain, "3 chain")
+		if one < 0 || two < 0 || three < 0 {
+			t.Fatalf("active=%d: switcher missing labels in %q", active, plain)
+		}
+		if !(one < two && two < three) {
+			t.Errorf("active=%d: switcher not in 1,2,3 order: %q", active, plain)
+		}
 		for _, want := range []string{"1 tree", "2 lanes", "3 chain"} {
-			if !containsPlain(stripANSI(tail), want) {
+			if !containsPlain(tail, want) {
 				t.Errorf("active=%d: switcher missing %q in %q", active, want, tail)
 			}
 		}
 	}
 }
+
+// TestHelpOverlayRenders checks that the "?" full-help dialog builds a boxed
+// list of keybindings for the current screen (a regression guard so the help
+// modal keeps rendering and isn't empty).
+func TestHelpOverlayRenders(t *testing.T) {
+	m := Model{help: help.New()}
+	m.screen = ScreenTree
+	m.overlay = OverlayHelp
+	ov := m.viewOverlay(100)
+	if strings.TrimSpace(ov) == "" {
+		t.Fatal("? help overlay rendered empty")
+	}
+	for _, probe := range []string{"key bindings", "move", "find", "quit"} {
+		if !containsPlain(stripANSI(ov), probe) {
+			t.Errorf("? help overlay missing %q in:\n%s", probe, stripANSI(ov))
+		}
+	}
+}
+
 
 func kmFor(s Screen) screenKeys {
 	switch s {
