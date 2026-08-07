@@ -214,11 +214,11 @@ func (m Model) viewChain(w, h int) string {
 	inner := w - 4
 	var body []string
 
-	title := "chain"
+	title := "flowcli ─ chain"
 	if m.focusID != "" {
-		title = "chain ─ focus " + m.focusID
+		title = "flowcli ─ chain ─ focus " + m.focusID
 	} else if wps := m.activeWPs(); len(wps) > 0 {
-		title = "chain ─ " + wps[m.chainWP].Title
+		title = "flowcli ─ chain ─ " + wps[m.chainWP].Title
 	}
 
 	body = append(body, "")
