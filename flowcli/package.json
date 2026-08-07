@@ -1,0 +1,14 @@
+{
+  "name": "flowcli",
+  "private": true,
+  "version": "0.1.0",
+  "description": "FlowControl terminal UI (Go + Bubble Tea). npm used to drive the docker dev workflow.",
+  "scripts": {
+    "dev": "docker compose run --build --rm flowcli",
+    "demo": "docker compose run --build --rm flowcli -demo",
+    "build": "docker compose build flowcli",
+    "server": "docker compose --profile dedicated up -d flowd",
+    "server:stop": "docker compose --profile dedicated down",
+    "dev:dedicated": "docker compose --profile dedicated run --build --rm flowcli -addr flowd:50052"
+  }
+}

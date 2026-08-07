@@ -20,9 +20,16 @@ import (
 )
 
 func main() {
+	// FLOWCLI_ADDR sets the default server address (independent of flowd's own
+	// bind), so the same binary works inside a container (via compose) and
+	// natively; a literal -addr still wins.
+	addrDefault := "127.0.0.1:50051"
+	if v := os.Getenv("FLOWCLI_ADDR"); v != "" {
+		addrDefault = v
+	}
 	var (
 		demo   = flag.Bool("demo", false, "use the in-memory fixture instead of the flowd server")
-		addr   = flag.String("addr", "127.0.0.1:50051", "flowd gRPC address")
+		addr   = flag.String("addr", addrDefault, "flowd gRPC address")
 		author = flag.String("author", "you", "author name attached to writes")
 	)
 	flag.Parse()

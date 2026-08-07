@@ -1,0 +1,58 @@
+# flowcli - the FlowControl TUI, in a container.
+#
+# By default the TUI CONNECTS TO AN EXISTING CORE (reachable as
+# FLOWCLI_ADDR, default host.docker.internal:50051 - the web app's flowd, with
+# `docker compose up` in the repo root). No dedicated server is started.
+#
+# Run from THIS directory (compose reads flowcli/.env):
+#   docker compose run --rm flowcli                     # attach to host core
+#   docker compose run --rm flowcli -demo               # fixtures only, no core
+#   docker compose run --rm flowcli -addr <host>:<port> # anything else
+#   docker compose --profile dedicated run --rm flowcli -addr flowd:50052
+#
+# A dedicated flowd just for the CLI is available under the `dedicated` profile
+# (bound to FLOWCLI_FLOWD_PORT, default 50052) - only needed if you want a core
+# that does not share state with the web app's. It keeps its own cargo cache
+# volumes (flowcli-flowd-*) so a concurrent web-core build never contends on the
+# shared target dir; the binary itself is identical (flowd-dev:latest).
+services:
+  flowcli:
+    build: .
+    image: flowcli-dev:latest
+    environment:
+      FLOWCLI_ADDR: "${FLOWCLI_ADDR:-host.docker.internal:50051}"
+    entrypoint: ["flowcli"]
+    command: ["-addr", "${FLOWCLI_ADDR:-host.docker.internal:50051}"]
+    # The TUI is interactive: attach a tty and stdin.
+    stdin_open: true
+    tty: true
+
+  flowd:
+    profiles: ["dedicated"]
+    build:
+      context: ..
+      dockerfile: flowd/Dockerfile
+    image: flowd-dev:latest
+    command:
+      - cargo-watch
+      - --poll
+      - -x
+      - "run -- serve --addr 0.0.0.0:${FLOWCLI_FLOWD_PORT:-50052} --db :memory: --seed"
+    ports:
+      - "${FLOWCLI_FLOWD_PORT:-50052}:${FLOWCLI_FLOWD_PORT:-50052}"
+    volumes:
+      - type: bind
+        source: ..
+        target: /work
+      - flowcli-flowd-cargo:/usr/local/cargo/registry
+      - flowcli-flowd-target:/tmp/target
+    working_dir: /work/flowd
+    environment:
+      CARGO_TARGET_DIR: /tmp/target
+      RUST_LOG: info
+
+volumes:
+  flowcli-flowd-cargo:
+    name: flowcli-flowd-cargo
+  flowcli-flowd-target:
+    name: flowcli-flowd-target

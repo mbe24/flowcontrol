@@ -1,0 +1,12 @@
+# Keep the build context lean: only the Go sources the build needs.
+.git
+flowcli
+docker-compose.yml
+docker-compose.*.yml
+package.json
+package-lock.json
+*.md
+.env
+.env.*
+.gitignore
+.dockerignore

@@ -111,6 +111,12 @@ func (m Model) View() string {
 
 	w := m.width
 	h := m.height
+	// Guard against a zero/unknown terminal width: layout math (e.g.
+	// strings.Repeat) panics on a negative count. A narrow-but-usable floor
+	// beats a crash.
+	if w < 20 {
+		w = 20
+	}
 	if h < 12 {
 		h = 12
 	}
