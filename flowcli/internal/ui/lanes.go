@@ -241,6 +241,7 @@ func (m Model) viewLanes(w, h int) string {
 			depth = len(c)
 		}
 	}
+	grid := make([]string, 0, depth)
 	for r := 0; r < depth; r++ {
 		var line strings.Builder
 		for i := range lanes {
@@ -253,8 +254,56 @@ func (m Model) viewLanes(w, h int) string {
 			}
 			line.WriteString(cell(cl.plain, cl.rendered, widths[i]))
 		}
-		body = append(body, line.String())
+		grid = append(grid, line.String())
 	}
+
+	// Vertically scroll the lane grid so the active card stays visible.
+	// frame() reserves height-4 body rows: 2 go to the fixed header + rule,
+	// the rest belongs to the grid, so compute the grid viewport from that.
+	gridRoom := h - 6 // header(2) + frame padding(4)
+	if len(lanes) == 1 {
+		gridRoom-- // one-lane mode shows a dot row after the grid
+	}
+	if gridRoom < 1 {
+		gridRoom = 1
+	}
+
+	// find the grid row of the active card's first line
+	activeRow := 0
+	if len(lanes) > 0 && m.lane < len(lanes) {
+		tasks := m.laneTasks(lanes[m.lane])
+		cur := m.laneCursor[m.lane]
+		if cur < len(tasks) {
+			// compute offset: cards before the selected one take
+			// (header + titleLines + footer) rows plus one blank separator each.
+			for ti := 0; ti < cur; ti++ {
+				c := m.laneCard(tasks[ti], widths[m.lane], false)
+				activeRow += len(c) + 1
+			}
+		}
+	}
+
+	// scroll so the active card is visible, keeping at least one row of it on
+	// screen, and never past the bottom of the grid.
+	scroll := 0
+	if activeRow > gridRoom-1 {
+		scroll = activeRow - (gridRoom - 1)
+	}
+	if scroll > max(0, depth-gridRoom) {
+		scroll = max(0, depth-gridRoom)
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+
+	vis := grid
+	if scroll < len(vis) {
+		vis = vis[scroll:]
+	}
+	if len(vis) > gridRoom {
+		vis = vis[:gridRoom]
+	}
+	body = append(body, vis...)
 
 	keys := key("h/l") + " lane  " + key("j/k") + " card  " + key("ret") + " detail  " +
 		key("s") + " status  " + key("1") + " tree  " + key("3") + " chain"
