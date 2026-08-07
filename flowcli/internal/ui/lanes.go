@@ -230,7 +230,10 @@ func (m Model) viewLanes(w, h int) string {
 			rp.WriteString(strings.Repeat(" ", gutter))
 			rr.WriteString(strings.Repeat(" ", gutter))
 		}
-		rule := strings.Repeat("─", min(widths[i]-2, wlen(string(st))+4))
+		// Rule spans the full lane width so the colored line reaches past the
+		// condition check-mark in the card header and aligns with the lane's
+		// right border, matching the left border.
+		rule := strings.Repeat("─", widths[i])
 		rr.WriteString(cell(rule, styles.Status(st).Render(rule), widths[i]))
 	}
 	body = append(body, rr.String())
