@@ -59,6 +59,7 @@ func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "/":
 		m.overlay = OverlayFinder
+		m.prevScreen = m.screen
 		m.input.SetValue("")
 		m.input.Placeholder = "task, step or command"
 		m.input.Focus()
@@ -76,7 +77,7 @@ func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case ScreenActivity:
 			m.screen = ScreenDetail
 		case ScreenDetail:
-			m.screen = ScreenTree
+			m.screen = m.prevScreen
 		}
 		return m, nil
 
@@ -84,6 +85,7 @@ func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if n, ok := m.current(); ok {
 			m.selectedID = m.ownerTask(n).ID
 			m.stepCursor = 0
+			m.prevScreen = m.screen
 			m.screen = ScreenDetail
 		}
 		return m, nil

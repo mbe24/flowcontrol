@@ -78,6 +78,11 @@ type Model struct {
 	err     error
 	flash   string
 
+	// prevScreen is the view we came from into an overlay detail, so ESC
+	// returns to it instead of always falling back to the tree. Updated every
+	// time we enter detail.
+	prevScreen Screen
+
 	// tree
 	rows      []row
 	cursor    int
