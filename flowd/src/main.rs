@@ -5,7 +5,9 @@
 
 use std::net::SocketAddr;
 
+use axum::Router;
 use clap::Parser;
+use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 
 use flowd::db;
@@ -69,10 +71,31 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
     }
 
     let store: DynStore = std::sync::Arc::new(SqliteStore::from_pool(pool));
-    let svc = ServerTonic::new(FlowServiceServer::new(store));
+    let grpc_service = ServerTonic::new(FlowServiceServer::new(store));
+    // tonic-web decodes HTTP/1.1 grpc-web (browser) while raw gRPC over HTTP/2
+    // (TUI) passes straight through; into_router() exposes the gRPC routes as an
+    // axum Router, which axum::serve hosts over both HTTP/1.1 and HTTP/2.
+    let wrapped_grpc = tonic_web::enable(grpc_service);
+    // into_router is deprecated in 0.12 (Routes::into_axum_router), but tonic
+    // 0.12.x exposes no non-deprecated public path from the builder to the axum
+    // router; keep the working API until the next tonic major.
+    #[allow(deprecated)]
+    let grpc_router = tonic::transport::Server::builder()
+        .accept_http1(true)
+        .add_service(wrapped_grpc)
+        .into_router();
 
-    info!(%addr, "listening");
+    // Dev CORS so the browser's flowui origin can reach the core at 127.0.0.1.
+    // Any is fine while bound to loopback; lock to the exact origin in M4.
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_headers(Any)
+        .allow_methods(Any);
+    let app = Router::new().fallback_service(grpc_router).layer(cors);
+
+    info!(%addr, "listening (gRPC + grpc-web)");
     let listener = tokio::net::TcpListener::bind(addr).await?;
+
     let (tx, rx) = tokio::sync::oneshot::channel();
     let mut sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     tokio::spawn(async move {
@@ -80,14 +103,10 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         let _ = tx.send(());
     });
 
-    tonic::transport::Server::builder()
-        .add_service(svc)
-        .serve_with_incoming_shutdown(
-            tokio_stream::wrappers::TcpListenerStream::new(listener),
-            async {
-                let _ = rx.await;
-            },
-        )
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            let _ = rx.await;
+        })
         .await?;
 
     info!("shutting down");

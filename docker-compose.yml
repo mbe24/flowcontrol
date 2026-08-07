@@ -1,0 +1,48 @@
+# Local dev environment for the FlowControl core.
+#
+# This host cannot build Rust natively (Windows blocks build scripts), so the
+# core runs in a container. The repo is bind-mounted, the cargo registry and
+# target dir are cached in named volumes (incremental rebuilds), and `cargo
+# watch --poll` restarts `flowd serve` whenever a Rust source file changes.
+#
+# The web app (flowui) stays on the host for instant Vite/HMR:
+#   npm --prefix flowui run dev          # talk to the core on 127.0.0.1:50051
+#
+# Instead of native cargo here, the same command runs today inside WSL/Linux
+# where build scripts are not blocked:
+#   cd flowd && cargo watch -x 'run -- serve --db :memory: --seed'
+#
+# Usage:
+#   docker compose up --build        # run the core (cargo watch, live reload)
+#   docker compose down             # stop it
+services:
+  flowd:
+    build:
+      context: .
+      dockerfile: flowd/Dockerfile
+    image: flowd-dev:latest
+    command:
+      - cargo-watch
+      - --poll
+      - -x
+      # --addr 0.0.0.0: the container must accept traffic the docker-proxy
+      # forwards on the bridge; native use keeps the code's 127.0.0.1 default.
+      - "run -- serve --addr 0.0.0.0:50051 --db :memory: --seed"
+    ports:
+      - "50051:50051"
+    volumes:
+      - type: bind
+        source: .
+        target: /work
+      - flowd-cargo:/usr/local/cargo/registry
+      - flowd-target:/tmp/target
+    working_dir: /work/flowd
+    environment:
+      CARGO_TARGET_DIR: /tmp/target
+      RUST_LOG: info
+
+volumes:
+  flowd-cargo:
+    name: flowd-cargo
+  flowd-target:
+    name: flowd-target
