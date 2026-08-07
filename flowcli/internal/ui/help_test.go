@@ -55,20 +55,33 @@ func TestStatusLineViewSwitcher(t *testing.T) {
 	}
 }
 
-// TestHelpOverlayRenders checks that the "?" full-help dialog builds a boxed
-// list of keybindings for the current screen (a regression guard so the help
-// modal keeps rendering and isn't empty).
+// TestHelpOverlayRenders checks that the "?" full-help is a full-screen panel
+// titled "key map" with three column groups (MOVE, ACT, FIND & SCOPE). A
+// regression guard so the help panel keeps rendering and isn't empty.
 func TestHelpOverlayRenders(t *testing.T) {
-	m := Model{help: help.New()}
+	m := loadModel(t)
 	m.screen = ScreenTree
 	m.overlay = OverlayHelp
-	ov := m.viewOverlay(100)
+	m.width, m.height = 100, 20
+	ov := m.View()
 	if strings.TrimSpace(ov) == "" {
-		t.Fatal("? help overlay rendered empty")
+		t.Fatal("? help panel rendered empty")
 	}
-	for _, probe := range []string{"key bindings", "move", "find", "quit"} {
+	for _, probe := range []string{"MOVE", "ACT", "FIND & SCOPE", "move", "find", "quit"} {
 		if !containsPlain(stripANSI(ov), probe) {
-			t.Errorf("? help overlay missing %q in:\n%s", probe, stripANSI(ov))
+			t.Errorf("? help panel missing %q in:\n%s", probe, stripANSI(ov))
+		}
+	}
+	// The panel is borderless and flush to the top: the first line must be a
+	// lane title, with no frame corners or walls around the content.
+	plain := stripANSI(ov)
+	firstLine := strings.SplitN(plain, "\n", 2)[0]
+	if !strings.Contains(firstLine, "MOVE") {
+		t.Errorf("? help panel not flush to top; first line = %q", firstLine)
+	}
+	for _, marker := range []string{"╭", "╮", "╰", "╯", "│", "├"} {
+		if strings.Contains(plain, marker) {
+			t.Errorf("? help panel should be borderless but contains %q", marker)
 		}
 	}
 }

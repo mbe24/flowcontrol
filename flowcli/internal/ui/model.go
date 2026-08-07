@@ -48,7 +48,7 @@ const finderVisible = 6
 // finderInner is the fixed content width of the find dialog. Every line is
 // padded/truncated to this many cells so the dialog keeps a constant size
 // regardless of how many or how long the results are.
-const finderInner = 56
+const finderInner = 62
 
 type loadedMsg struct {
 	nodes    []store.Node

@@ -160,7 +160,7 @@ func (m Model) viewOverlay(w int) string {
 					kind = styles.StepGlyph(n.Status)
 				}
 				row := marker + styles.Status(n.Status).Render(kind) + " " +
-					styles.DimS.Render(padTrunc(n.ID, 9)) + " " + titleS.Render(padTrunc(n.Title, 30))
+					styles.DimS.Render(padTrunc(n.ID, 9)) + " " + titleS.Render(padTrunc(n.Title, finderInner-14))
 				rows[k] = pad(row, finderInner)
 			}
 		}
@@ -173,21 +173,6 @@ func (m Model) viewOverlay(w int) string {
 		lines = append(lines, styles.DimS.Render(strings.Repeat("─", finderInner)),
 			pad(styles.DimS.Render(foot), finderInner))
 		return box("find", "", lines, w)
-	case OverlayHelp:
-		km := kmForScreen(m.screen)
-		helpView := m.help.FullHelpView(km.FullHelp())
-		lines := split(helpView)
-		return box("key bindings", "", lines, w)
 	}
 	return ""
-}
-
-// split returns the individual lines of s (which may itself contain newlines),
-// trimming blank trailing space so box() sizes itself to the content.
-func split(s string) []string {
-	var out []string
-	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
-		out = append(out, line)
-	}
-	return out
 }

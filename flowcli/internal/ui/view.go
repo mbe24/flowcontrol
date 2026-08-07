@@ -91,12 +91,14 @@ func frame(title string, body []string, keys string, inner, height int) string {
 	}
 
 	b.WriteString(styles.DimS.Render("├"+strings.Repeat("─", inner+2)+"┤") + "\n")
-	kv := wlen(keys)
-	kfill := inner - kv
-	if kfill < 0 {
-		kfill = 0
+	if keys != "" {
+		kv := wlen(keys)
+		kfill := inner - kv
+		if kfill < 0 {
+			kfill = 0
+		}
+		b.WriteString(wall + " " + keys + strings.Repeat(" ", kfill) + " " + wall + "\n")
 	}
-	b.WriteString(wall + " " + keys + strings.Repeat(" ", kfill) + " " + wall + "\n")
 	b.WriteString(styles.AccentS.Render("╰" + strings.Repeat("─", inner+2) + "╯"))
 	return b.String()
 }
@@ -139,6 +141,10 @@ func (m Model) View() string {
 		main = m.viewTree(w, h)
 	}
 
+	if m.overlay == OverlayHelp {
+		// Help is a full-screen panel rather than a centred dialog.
+		return m.viewHelpPanel(w, h)
+	}
 	if ov := m.viewOverlay(w); ov != "" {
 		return overlay(main, ov, w, h)
 	}
@@ -190,8 +196,9 @@ func (m Model) viewTree(w, h int) string {
 			prefix := styles.DimS.Render(caret) + " "
 			// WP columns share the same fixed widths as the task row so the
 			// step-ratio bar lands under the task condition column and the
-			// step-percent under the task step-counter.
-			right := "  " + state + "  " + bar + " " + padr(fmt.Sprintf("%d%%", pct), ratioW)
+			// step-percent under the task step-counter. The state is separated
+			// from the bar by a wider gap so it doesn't crowd the ratio bars.
+			right := "  " + state + "      " + bar + " " + padr(fmt.Sprintf("%d%%", pct), ratioW)
 			line := treeRow(prefix, rw.node.Title, styles.BrightS.Render(rw.node.Title), right, inner)
 			body = append(body, line)
 			continue
