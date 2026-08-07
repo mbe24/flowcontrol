@@ -135,7 +135,10 @@ func (m *Model) buildChain() {
 
 		nextGutter := gutter
 		if depth == 0 {
-			nextGutter = "  "
+			// One space, not two: the root's branch marker occupies one column
+			// ("─┬"), so a single leading space puts the first child's corner
+			// ("└" / "├") directly under the root's vertical connector.
+			nextGutter = " "
 		} else if last {
 			nextGutter = gutter + "  "
 		} else {
