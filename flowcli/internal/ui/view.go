@@ -152,11 +152,21 @@ func (m Model) viewTree(w, h int) string {
 	inner := w - 4
 	var body []string
 
-	d, r, b, df, _ := m.projectTotals()
-	summary := styles.Status(store.Ready).Render(fmt.Sprintf("READY %d", r)) + "   " +
+	d, r, b, df, total := m.projectTotals()
+	pct := 0
+	if total > 0 {
+		pct = d * 100 / total
+	}
+	prefix := "  " +
+		styles.Status(store.Ready).Render(fmt.Sprintf("READY %d", r)) + "   " +
 		styles.Status(store.Blocked).Render(fmt.Sprintf("BLOCKED %d", b)) + "   " +
 		styles.Status(store.Deferred).Render(fmt.Sprintf("DEFER %d", df)) + "   " +
 		styles.Status(store.Done).Render(fmt.Sprintf("DONE %d", d))
+	// Project tail mirrors the WP row: step-ratio bar under the task condition
+	// column, step-percent right-aligned under the task step-counter.
+	bar := progressBar(d, r, b, df, total, condW)
+	right := "  " + bar + " " + padr(fmt.Sprintf("%d%%", pct), ratioW)
+	summary := treeRow(prefix, "", "", right, inner)
 	body = append(body, summary)
 	body = append(body, styles.DimS.Render(strings.Repeat("─", inner)))
 

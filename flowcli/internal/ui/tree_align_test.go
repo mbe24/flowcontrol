@@ -103,3 +103,42 @@ func TestTreeBarConditionAlignment(t *testing.T) {
 			barStart, condStart)
 	}
 }
+
+// TestTreeProjectBarAlignment verifies that the project summary row's
+// step-ratio bar starts at the same column as the work-package bar (and the
+// task condition column), and that the project percent right-aligns with the
+// WP percent. This keeps the top summary line visually in step with the rows
+// below it.
+func TestTreeProjectBarAlignment(t *testing.T) {
+	m := loadModel(t)
+	m.screen = ScreenTree
+	m.width, m.height = 100, 40
+
+	lines := strings.Split(m.View(), "\n")
+	var projBar, projPct, wpBar, wpPct int
+	for _, ln := range lines {
+		if !strings.HasPrefix(ln, "│ ") || !strings.HasSuffix(ln, "│") {
+			continue
+		}
+		plain := stripANSI(ln)
+		// project summary: starts with the READY/BLOCKED/DEFER/DONE counts
+		if strings.Contains(plain, "READY") && strings.Contains(plain, "%") && strings.Contains(plain, "█") {
+			projBar = wlen(plain[:strings.Index(plain, "█")])
+			projPct = wlen(plain[:strings.Index(plain, "%")])
+		} else if strings.Contains(plain, "%") && strings.Contains(plain, "█") && strings.Contains(plain, "ACTIVE") {
+			wpBar = wlen(plain[:strings.Index(plain, "█")])
+			wpPct = wlen(plain[:strings.Index(plain, "%")])
+		}
+	}
+	if projBar == 0 || wpBar == 0 {
+		t.Fatalf("could not find project/WP bars; view:\n%s", m.View())
+	}
+	if projBar != wpBar {
+		t.Errorf("project bar starts at col %d but WP bar starts at col %d; they should align",
+			projBar, wpBar)
+	}
+	if projPct != wpPct {
+		t.Errorf("project percent ends at col %d but WP percent ends at col %d; they should align",
+			projPct, wpPct)
+	}
+}
