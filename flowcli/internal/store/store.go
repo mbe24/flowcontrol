@@ -142,7 +142,7 @@ type Store interface {
 	// CreateProject adds a project and returns its id. The memory store
 	// assigns ids; the gRPC path will round-trip through the engine once the
 	// proto gains CreateProject.
-	CreateProject(ctx context.Context, name, description string) (string, error)
+	CreateProject(ctx context.Context, name, description string, seed bool) (string, error)
 	// CreateNode adds a child node and returns its id.
 	CreateNode(ctx context.Context, n NewNode) (string, error)
 }

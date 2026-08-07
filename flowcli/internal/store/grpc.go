@@ -159,7 +159,7 @@ func (g *GRPC) AddComment(ctx context.Context, nodeID, text string) error {
 	return err
 }
 
-func (g *GRPC) CreateProject(_ context.Context, name, description string) (string, error) {
+func (g *GRPC) CreateProject(_ context.Context, name, description string, _ bool) (string, error) {
 	return "", fmt.Errorf("CreateProject: flowd proto has no CreateProject RPC yet")
 }
 

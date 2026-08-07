@@ -229,6 +229,6 @@ func TestGRPCCreateProjectUnsupported(t *testing.T) {
 	mc := new(mockClient)
 	g := NewGRPCWithClient(mc, "mbe")
 
-	_, err := g.CreateProject(context.Background(), "New App", "desc")
+	_, err := g.CreateProject(context.Background(), "New App", "desc", true)
 	require.Error(t, err)
 }

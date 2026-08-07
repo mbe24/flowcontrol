@@ -283,7 +283,7 @@ func (m *Memory) AddComment(_ context.Context, nodeID, text string) error {
 	return nil
 }
 
-func (m *Memory) CreateProject(_ context.Context, name, description string) (string, error) {
+func (m *Memory) CreateProject(_ context.Context, name, description string, _ bool) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.seq++

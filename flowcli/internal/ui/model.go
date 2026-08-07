@@ -14,7 +14,8 @@ import (
 type Screen int
 
 const (
-	ScreenTree Screen = iota
+	ScreenLanding Screen = iota
+	ScreenTree
 	ScreenLanes
 	ScreenChain
 	ScreenDetail
@@ -31,6 +32,8 @@ const (
 	OverlayConfirm
 	OverlayComment
 	OverlayHelp
+	OverlayCreate
+	OverlayCascade
 )
 
 // Lane layout thresholds, derived from the drawn card widths:
@@ -132,6 +135,10 @@ type Model struct {
 		id   string
 		prev store.Status
 	}
+
+	// create / landing (Phase C designer components); cascade (Phase D)
+	create  createState
+	landing landingState
 }
 
 func New(s store.Store) Model {
@@ -143,13 +150,15 @@ func New(s store.Store) Model {
 		store:     s,
 		ctx:       context.Background(),
 		projectID: "prj-travel",
-		screen:    ScreenTree,
+		screen:    ScreenLanding,
 		collapsed: map[string]bool{},
 		openSteps: map[string]bool{},
 		input:     ti,
 		help:      help.New(),
 		width:     120,
 		height:    40,
+		landing:   landingState{counts: map[string][2]int{}},
+		create:    createState{errAt: -1},
 	}
 }
 

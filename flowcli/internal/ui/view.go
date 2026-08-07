@@ -107,7 +107,7 @@ func (m Model) View() string {
 	if m.err != nil {
 		return "\n  " + lipgloss.NewStyle().Foreground(styles.Blocked).Render("error: "+m.err.Error()) + "\n"
 	}
-	if len(m.nodes) == 0 {
+	if len(m.nodes) == 0 && m.screen != ScreenLanding {
 		return "\n  loading…\n"
 	}
 
@@ -125,6 +125,8 @@ func (m Model) View() string {
 
 	var main string
 	switch m.screen {
+	case ScreenLanding:
+		main = m.viewLanding(w, h)
 	case ScreenLanes:
 		if m.width < OneLaneMin {
 			main = m.viewTree(w, h)

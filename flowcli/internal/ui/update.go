@@ -58,6 +58,46 @@ func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = ScreenChain
 		return m, nil
 
+	case "P":
+		// back to the project landing screen
+		m.screen = ScreenLanding
+		return m, nil
+
+	case "o":
+		// new sibling below the cursor
+		if n, ok := m.current(); ok {
+			switch n.Type {
+			case store.WorkPackage:
+				m.openCreate(createTask, n.ID, "", true)
+			case store.Task:
+				m.openCreate(createTask, n.ParentID, "", true)
+			default:
+				m.openCreate(createStep, n.ParentID, "", true)
+			}
+		}
+		return m, nil
+
+	case "O":
+		// new child of the cursor
+		if n, ok := m.current(); ok {
+			switch n.Type {
+			case store.WorkPackage:
+				m.openCreate(createTask, n.ID, "", true)
+			case store.Task:
+				m.openCreate(createStep, n.ID, "", true)
+			}
+		}
+		return m, nil
+
+	case "c":
+		// full create form, kind unlocked
+		parent := ""
+		if n, ok := m.current(); ok && n.Type == store.WorkPackage {
+			parent = n.ID
+		}
+		m.openCreate(createPackage, parent, "", false)
+		return m, nil
+
 	case "?":
 		m.overlay = OverlayHelp
 		return m, nil
@@ -122,6 +162,8 @@ func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch m.screen {
+	case ScreenLanding:
+		return m.updateLanding(msg)
 	case ScreenTree:
 		return m.updateTree(msg)
 	case ScreenLanes:
@@ -270,6 +312,8 @@ func (m Model) updateActivity(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.overlay {
+	case OverlayCreate:
+		return m.updateCreate(msg)
 	case OverlayHelp:
 		switch msg.String() {
 		case "esc", "?", "q":

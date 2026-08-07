@@ -53,7 +53,7 @@ func (m *mockStore) AddComment(ctx context.Context, nodeID, text string) error {
 	return args.Error(0)
 }
 
-func (m *mockStore) CreateProject(ctx context.Context, name, description string) (string, error) {
+func (m *mockStore) CreateProject(ctx context.Context, name, description string, _ bool) (string, error) {
 	args := m.Called(ctx, name, description)
 	return args.String(0), args.Error(1)
 }

@@ -74,6 +74,8 @@ func overlay(main, ov string, w, h int) string {
 
 func (m Model) viewOverlay(w int) string {
 	switch m.overlay {
+	case OverlayCreate:
+		return m.viewCreate(w)
 	case OverlayConfirm:
 		node, ok := m.byID[m.confirmID]
 		if !ok {
