@@ -17,7 +17,7 @@ var (
 	Dim      = lipgloss.Color("#5c6370")
 	Fg       = lipgloss.Color("#c8ccd4")
 	Bright   = lipgloss.Color("#e6e8ec")
-	SelBg    = lipgloss.Color("#1d2733")
+	SelBg    = lipgloss.Color("#808080")
 )
 
 // Package hues, assigned in work-package order.

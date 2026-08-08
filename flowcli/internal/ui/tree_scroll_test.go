@@ -29,6 +29,32 @@ func TestTreeSelectionVisible(t *testing.T) {
 	}
 }
 
+// TestSelectedLineStripsInternalResets verifies the selection logic is not
+// defeated by per-segment colour resets. selectedLine removes the intermediate
+// SGR resets from an already-styled row so a single background can span the
+// whole line, while keeping the row's full visible width. (Background colour
+// itself is TTY-dependent and can't be asserted under `go test`, so we check
+// the reset-stripping and width-preservation properties instead.)
+func TestSelectedLineSpansRow(t *testing.T) {
+	inner := 30
+	// an already-styled row with per-segment resets (like treeRow produces)
+	content := "  " + "\x1b[38;5;1m" + "●" + "\x1b[0m" + " " + "\x1b[38;5;15m" + "T-1042" + "\x1b[0m"
+	line := content + strings.Repeat(" ", inner-wlen(content))
+	out := selectedLine(line)
+
+	// No intermediate resets may remain: otherwise a background read across the
+	// whole row would be cut off at the first one.
+	if strings.Contains(out[:len(out)-len("\x1b[0m")], "\x1b[0m") {
+		t.Errorf("selectedLine left an internal reset; got %q", out)
+	}
+	if got := wlen(out); got != inner {
+		t.Errorf("selectedLine width = %d, want %d (pad spans full row)", got, inner)
+	}
+	if !strings.Contains(stripANSI(out), "T-1042") {
+		t.Errorf("selectedLine dropped the row content; got %q", out)
+	}
+}
+
 // TestTreeScrollsToCursor verifies the tree's vertical scroll follows the
 // cursor: moving down past the visible window advances treeScroll so the
 // selected row stays on screen. Regression for "scrolling does not work in

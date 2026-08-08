@@ -62,6 +62,16 @@ func treeRow(prefix, titlePlain, titleStyled, right string, inner int) string {
 	return prefix + cell(titlePlain, titleStyled, tw) + right
 }
 
+// selectedLine renders an already-styled, full-width tree row so the selection
+// background spans the entire row while keeping per-segment foreground colours.
+// It strips internal SGR resets (each segment's "colour off") so a single
+// background applied across the whole string isn't cut off at the first reset,
+// then re-applies one trailing reset.
+func selectedLine(line string) string {
+	stripped := strings.ReplaceAll(line, "\x1b[0m", "")
+	return styles.SelS.Render(stripped)
+}
+
 // frame draws the terminal box: ┌─ title ─┐ … ├─┤ keys └─┘.
 // Every row is padded to `inner` so the right wall closes.
 func frame(title string, body []string, keys string, inner, height int) string {
@@ -219,6 +229,9 @@ func (m Model) viewTree(w, h int) string {
 			// from the bar by a wider gap so it doesn't crowd the ratio bars.
 			right := "  " + state + "      " + bar + " " + padr(fmt.Sprintf("%d%%", pct), ratioW)
 			line := treeRow(prefix, rw.node.Title, styles.BrightS.Render(rw.node.Title), right, inner)
+			if sel {
+				line = selectedLine(line)
+			}
 			body = append(body, line)
 			continue
 		}
@@ -242,6 +255,9 @@ func (m Model) viewTree(w, h int) string {
 		ratioS := padr(fmt.Sprintf("%d/%d", done, total), ratioW)
 		right := " " + styles.Status(bdg.Kind).Render(bdg.Glyph) + " " + condS + " " + ratioS
 		line := treeRow(prefix, t.Title, titleS.Render(t.Title), right, inner)
+		if sel {
+			line = selectedLine(line)
+		}
 		body = append(body, line)
 
 		if bl := m.blockers[t.ID]; len(bl) > 0 && t.Status == store.Blocked {
