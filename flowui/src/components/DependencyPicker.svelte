@@ -6,8 +6,10 @@
 
   interface Props {
     node: FlowNode;
+    /** Opened via “Add dependency” — focus the search field immediately. */
+    autoFocus?: boolean;
   }
-  let { node }: Props = $props();
+  let { node, autoFocus = false }: Props = $props();
 
   const index = $derived(buildIndex(app.nodes, app.deps));
   const blockers = $derived(index.blockers.get(node.id) ?? []);
@@ -15,6 +17,11 @@
 
   let query = $state('');
   let open = $state(false);
+  let input: HTMLInputElement | undefined = $state();
+
+  $effect(() => {
+    if (autoFocus) queueMicrotask(() => input?.focus());
+  });
 
   /**
    * The picker is the complete surface: the graph only shows expanded packages,
@@ -69,6 +76,7 @@
   <div class="adder" class:open>
     <span class="mono dir accent">blocked by</span>
     <input
+      bind:this={input}
       bind:value={query}
       placeholder="search a task or package…"
       onfocus={() => (open = true)}

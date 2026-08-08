@@ -9,11 +9,14 @@
     togglePanelMode,
     toggleVerified,
     undo,
-    updateNode
+    updateNode,
+    select,
+    setWpState
   } from '../lib/state.svelte';
-  import { buildIndex, stepRatio, stepsOf } from '../lib/derive';
+  import { buildIndex, stepRatio, stepsOf, tasksOf, wpCounts } from '../lib/derive';
+  import { takeFocusTarget } from '../lib/state.svelte';
   import { ACTIVITY_VAR, ALL_STATUSES, STATUS_VAR, stepGlyph, verifyBadge } from '../lib/types';
-  import type { FlowNode } from '../lib/types';
+  import type { FlowNode, WPState } from '../lib/types';
   import EditableField from './EditableField.svelte';
   import InlineCreateRow from './InlineCreateRow.svelte';
   import DependencyPicker from './DependencyPicker.svelte';
@@ -48,6 +51,50 @@
   /** In peek the description truncates; expanded and full-screen show it all. */
   const paras = $derived(mode === 'peek' ? node.description.slice(0, 1) : node.description);
   const truncated = $derived(mode === 'peek' && node.description.length > 1);
+
+  /**
+   * A work package is not a task. It has no condition, no verification and no
+   * steps — its statuses are PLANNED…ARCHIVED and its progress is the rollup
+   * of its tasks. Rendering task chrome here was the bug.
+   */
+  const isWp = $derived(node.type === 'WORK_PACKAGE');
+  const WP_STATES: WPState[] = ['PLANNED', 'ACTIVE', 'DONE', 'ARCHIVED'];
+  const wpShort = (s: WPState) => (s === 'PLANNED' ? 'PLAN' : s === 'ARCHIVED' ? 'ARCH' : s);
+  const counts = $derived(isWp ? wpCounts(app.nodes, node.id) : null);
+  const wpTasks = $derived(isWp ? tasksOf(app.nodes, node.id) : []);
+  const pct = (n: number) => (counts && counts.total ? (n / counts.total) * 100 : 0);
+
+  // The menu says why it opened us; reveal that section once, then forget it.
+  let focusDeps = $state(false);
+  let focusTitle = $state(false);
+  /** Which step + field the menu asked us to open in edit mode. */
+  let focusStep = $state<{ id: string; field: 'title' | 'condition' | 'note' } | null>(null);
+  let depsEl: HTMLElement | undefined = $state();
+  let stepsEl: HTMLElement | undefined = $state();
+
+  $effect(() => {
+    const t = takeFocusTarget();
+    if (!t) return;
+    if (t.section === 'title') focusTitle = true;
+    if (t.section === 'deps') {
+      focusDeps = true;
+      queueMicrotask(() => {
+        depsEl?.scrollIntoView?.({ block: 'nearest' });
+        focusDeps = false;
+      });
+    }
+    if (t.section === 'steps') {
+      if (t.nodeId) {
+        focusStep = { id: t.nodeId, field: t.field ?? 'title' };
+        app.expandedStep[t.nodeId] = true;
+      }
+      queueMicrotask(() => stepsEl?.scrollIntoView?.({ block: 'nearest' }));
+    }
+  });
+
+  function clearStepFocus() {
+    focusStep = null;
+  }
 
   let editingDesc = $state(false);
   let descDraft = $state('');
@@ -89,22 +136,49 @@
     </div>
 
     <div class="title" class:big={wide}>
-      <span class="dot" style:background={STATUS_VAR[node.status]}></span>
-      <h1><EditableField nodeId={node.id} field="title" value={node.title} placeholder="Untitled" autostart={app.renameId === node.id} onStarted={() => (app.renameId = null)} /></h1>
+      {#if isWp}
+        <span class="hue"></span>
+      {:else}
+        <span class="dot" style:background={STATUS_VAR[node.status]}></span>
+      {/if}
+      <h1>
+        <EditableField
+          nodeId={node.id}
+          field="title"
+          value={node.title}
+          placeholder="Untitled"
+          autoEdit={focusTitle}
+          onStarted={() => (focusTitle = false)} />
+      </h1>
+      {#if isWp}<span class="mono kindtag">WP</span>{/if}
     </div>
 
     <div class="statusrow" class:inline={wide}>
-      {#each ALL_STATUSES as s}
-        <button
-          class="sbtn"
-          class:on={node.status === s}
-          class:tall={mode === 'sheet'}
-          style:--hue={STATUS_VAR[s]}
-          onclick={() => setStatus(node.id, s)}>{mode === 'sheet' && s === 'DEFERRED' ? 'DEFER' : s}</button>
-      {/each}
+      {#if isWp}
+        {#each WP_STATES as st}
+          <button
+            class="sbtn"
+            class:on={node.state === st}
+            class:tall={mode === 'sheet'}
+            style:--hue={st === 'ACTIVE' ? 'var(--ready)' : st === 'DONE' ? 'var(--done)' : 'var(--deferred)'}
+            onclick={() => setWpState(node.id, st)}>{mode === 'sheet' ? wpShort(st) : st}</button>
+        {/each}
+      {:else}
+        {#each ALL_STATUSES as s}
+          <button
+            class="sbtn"
+            class:on={node.status === s}
+            class:tall={mode === 'sheet'}
+            style:--hue={STATUS_VAR[s]}
+            onclick={() => setStatus(node.id, s)}>{mode === 'sheet' && s === 'DEFERRED' ? 'DEFER' : s}</button>
+        {/each}
+      {/if}
       {#if wide}
         <span class="spacer"></span>
-        <span class="mono meta">{steps.length} steps · {blockers.length + blocks.length} deps</span>
+        <span class="mono meta">
+          {#if isWp}{wpTasks.length} tasks · {blockers.length + blocks.length} deps
+          {:else}{steps.length} steps · {blockers.length + blocks.length} deps{/if}
+        </span>
       {/if}
     </div>
   </header>
@@ -138,6 +212,20 @@
         {/if}
       </section>
 
+      {#if isWp && counts}
+        <section>
+          <span class="label">Progress</span>
+          <div class="track">
+            <div style:width="{pct(counts.done)}%" style:background="var(--done)"></div>
+            <div style:width="{pct(counts.ready)}%" style:background="var(--ready)"></div>
+            <div style:width="{pct(counts.blocked)}%" style:background="var(--blocked)"></div>
+            <div style:width="{pct(counts.deferred)}%" style:background="var(--deferred)"></div>
+          </div>
+          <span class="mono fine">
+            {counts.done}/{counts.total} · {counts.pct}% · {counts.ready} ready · {counts.blocked} blocked
+          </span>
+        </section>
+      {:else}
       <section>
           <span class="label">Condition</span>
           <div class="mono field">
@@ -160,6 +248,7 @@
           </div>
           <span class="fine">fctrl never runs conditions. The agent reports; you accept.</span>
         </section>
+      {/if}
 
       {#if !wide}
         {@render stepList()}
@@ -188,25 +277,82 @@
 </div>
 
 {#snippet stepList()}
-  {#if steps.length}
-    <section>
+  {#if isWp}
+    <section bind:this={stepsEl}>
       <div class="sechead">
+        <span class="label">Tasks</span>
+        <span class="mono ratio">{wpTasks.length}</span>
+      </div>
+      {#each wpTasks as t (t.id)}
+        {@const r = stepRatio(app.nodes, t.id)}
+        <button class="wptask" onclick={() => select(t.id)}>
+          <span class="tdot" style:background={STATUS_VAR[t.status]}></span>
+          <span class="mono tid">{t.id}</span>
+          <span class="ttitle">{t.title}</span>
+          <span class="mono tsteps">{r.label}</span>
+        </button>
+      {/each}
+      <InlineCreateRow
+        projectId={app.projectId}
+        parentId={node.id}
+        type="TASK"
+        variant={wpTasks.length === 0 ? 'prominent' : 'ghost'}
+        label={wpTasks.length === 0 ? 'Add the first task…' : 'Add task…'}
+        onEscalate={(title) => (app.dialog = { kind: 'create', nodeType: 'TASK', parentId: node.id, title })} />
+    </section>
+  {:else if steps.length}
+    <section>
+      <div class="sechead" bind:this={stepsEl}>
         <span class="label">Steps</span>
         <span class="mono ratio">{ratio.label}</span>
       </div>
       {#each steps as s (s.id)}
         {@const open = wide ? app.expandedStep[s.id] !== false : app.expandedStep[s.id]}
         <div class="step" class:open>
-          <button class="steprow" onclick={() => s.note && toggleStep(s.id)}>
-            <span class="mono glyph" style:color={STATUS_VAR[s.status]}>{stepGlyph(s.status)}</span>
-            <span class="stitle" style:color={s.status === 'DONE' ? 'var(--fg3)' : 'var(--fg)'}>{s.title}</span>
-            {#if s.note}<span class="caret">{open ? '⌃' : '⌄'}</span>{/if}
-          </button>
-          {#if open && s.note}
-            <p class="snote">{s.note}</p>
-          {/if}
-          {#if open && s.condition}
-            <span class="mono scond">{s.condition}</span>
+          <div class="steprow">
+            <button
+              class="glyphbtn mono"
+              style:color={STATUS_VAR[s.status]}
+              title="Toggle notes"
+              aria-label="Toggle step"
+              onclick={() => toggleStep(s.id)}>{stepGlyph(s.status)}</button>
+            <span class="stitle" style:color={s.status === 'DONE' ? 'var(--fg3)' : 'var(--fg)'}>
+              <EditableField
+                nodeId={s.id}
+                field="title"
+                value={s.title}
+                placeholder="Untitled step"
+                klass="inline"
+                autoEdit={focusStep?.id === s.id && focusStep.field === 'title'}
+                onStarted={clearStepFocus} />
+            </span>
+            <button
+              class="caret"
+              onclick={() => toggleStep(s.id)}
+              aria-label="Toggle notes">{open ? '⌃' : '⌄'}</button>
+          </div>
+          {#if open}
+            <div class="snbody">
+              <EditableField
+                nodeId={s.id}
+                field="note"
+                value={s.note ?? ''}
+                placeholder="Add a description"
+                multiline
+                klass="inline"
+                autoEdit={focusStep?.id === s.id && focusStep.field === 'note'}
+                onStarted={clearStepFocus} />
+              <span class="mono scond">
+                <EditableField
+                  nodeId={s.id}
+                  field="condition"
+                  value={s.condition ?? ''}
+                  placeholder="no condition"
+                  klass="inline"
+                  autoEdit={focusStep?.id === s.id && focusStep.field === 'condition'}
+                  onStarted={clearStepFocus} />
+              </span>
+            </div>
           {/if}
         </div>
       {/each}
@@ -232,7 +378,9 @@
 {/snippet}
 
 {#snippet depList()}
-  <DependencyPicker {node} />
+  <div bind:this={depsEl}>
+    <DependencyPicker {node} autoFocus={focusDeps} />
+  </div>
 {/snippet}
 
 {#snippet activityList()}
@@ -444,6 +592,70 @@
     color: var(--fg);
     opacity: 0.85;
   }
+  .hue {
+    width: 3px;
+    height: 20px;
+    border-radius: 2px;
+    background: var(--accent);
+    margin-top: 3px;
+    flex: none;
+  }
+  .kindtag {
+    font-size: 10px;
+    color: var(--fg3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    flex: none;
+    margin-top: 4px;
+  }
+  .track {
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+    background: var(--track);
+  }
+  .wptask {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 7px;
+    background: var(--panel2);
+    border: 1px solid var(--border2);
+    cursor: pointer;
+    font-family: inherit;
+    color: var(--fg);
+    text-align: left;
+  }
+  .wptask:hover {
+    border-color: var(--border);
+  }
+  .tdot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex: none;
+  }
+  .tid {
+    font-size: 9.5px;
+    color: var(--fg3);
+    flex: none;
+  }
+  .ttitle {
+    flex: 1;
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tsteps {
+    font-size: 9.5px;
+    color: var(--fg3);
+    flex: none;
+  }
   .proseedit {
     display: block;
     width: 100%;
@@ -582,10 +794,17 @@
     width: 100%;
     padding: 7px 9px;
     background: transparent;
-    border: 0;
-    cursor: pointer;
     font-family: inherit;
     text-align: left;
+  }
+  .glyphbtn {
+    flex: none;
+    width: 14px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font-size: 10px;
+    cursor: pointer;
   }
   .glyph {
     font-size: 10px;
@@ -593,14 +812,17 @@
   }
   .stitle {
     flex: 1;
+    min-width: 0;
     font-size: 11.5px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   .caret {
-    font-size: 9px;
+    flex: none;
+    border: 0;
+    background: transparent;
     color: var(--fg3);
+    font-size: 9px;
+    cursor: pointer;
+    padding: 2px 4px;
   }
   .snote {
     margin: 0;
@@ -610,9 +832,15 @@
     color: var(--fg2);
     text-wrap: pretty;
   }
+  /* The expanded editing area: step body (note) then its condition. */
+  .snbody {
+    padding: 2px 10px 8px 21px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
   .scond {
     display: block;
-    padding: 0 10px 8px 27px;
     font-size: 9.5px;
     color: var(--fg3);
   }
@@ -740,6 +968,18 @@
   @media (max-width: 860px) {
     .sbtn.tall {
       min-height: 44px;
+    }
+    .wptask,
+    .steprow {
+      min-height: 44px;
+    }
+    .glyphbtn,
+    .caret {
+      min-width: 32px;
+      min-height: 32px;
+    }
+    .track {
+      height: 10px;
     }
     .icon {
       width: 32px;

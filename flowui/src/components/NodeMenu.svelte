@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app } from '../lib/state.svelte';
+  import { app, renameNode, select } from '../lib/state.svelte';
   import { stepsOf, tasksOf, workPackages } from '../lib/derive';
   import type { FlowNode, NodeType } from '../lib/types';
 
@@ -29,27 +29,27 @@
     onclose();
   }
 
-  // Edge sometimes swallows the `click` that follows a context-menu gesture, so
-  // act on mousedown (fires with the press) instead of onclick.
   const go = (fn: () => void) => (e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     act(fn);
   };
 
-  function rename() {
-    app.selectedId = node.id;
-    app.renameId = node.id;
-  }
-
   function create(type: NodeType, parentId: string) {
     app.dialog = { kind: 'create', nodeType: type, parentId, title: '' };
+  }
+
+  function editStepField(field: 'condition' | 'note') {
+    if (node.parentId) {
+      select(node.parentId, { section: 'steps', nodeId: node.id, field });
+      app.expandedStep[node.id] = true;
+    }
   }
 </script>
 
 <div class="scrim" onclick={onclose} oncontextmenu={(e) => { e.preventDefault(); onclose(); }} role="presentation"></div>
 <div class="menu" class:sheet={mobile} style:left={mobile ? undefined : `${x}px`} style:top={mobile ? undefined : `${y}px`} role="menu">
-  <button onclick={go(rename)}>
+  <button onclick={go(() => renameNode(node))}>
     <span class="mono ic">✎</span>Rename<span class="mono k">F2</span>
   </button>
 
@@ -62,7 +62,17 @@
     <button onclick={go(() => create('STEP', node.id))}>
       <span class="mono ic">+</span>Add step
     </button>
-    <button onclick={go(() => { app.selectedId = node.id; })}>
+  {/if}
+  {#if isStep}
+    <button onclick={go(() => editStepField('condition'))}>
+      <span class="mono ic">≡</span>Edit condition
+    </button>
+    <button onclick={go(() => editStepField('note'))}>
+      <span class="mono ic">✎</span>Edit description
+    </button>
+  {/if}
+  {#if isTask || isWp}
+    <button onclick={go(() => select(node.id, { section: 'deps' }))}>
       <span class="mono ic">⇄</span>Add dependency
     </button>
   {/if}

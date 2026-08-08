@@ -8,7 +8,8 @@ import type {
   NodeType,
   Project,
   Status,
-  Verification
+  Verification,
+  WPState
 } from './types';
 import { NO_VERIFICATION } from './types';
 
@@ -265,6 +266,15 @@ export class MemoryStore implements FlowStore {
     this.push(nodeId, 'comment', text);
   }
 
+  async setWpState(nodeId: string, state: WPState): Promise<void> {
+    await sleep(40);
+    const n = this.nodeList.find((x) => x.id === nodeId);
+    if (!n || n.type !== 'WORK_PACKAGE') return;
+    const prev = n.state;
+    n.state = state;
+    this.push(nodeId, 'status', `${prev} → ${state}`);
+  }
+
   // ── writes ────────────────────────────────────────────────────────────────
 
   async createNode(input: NewNode): Promise<string> {
@@ -310,6 +320,10 @@ export class MemoryStore implements FlowStore {
       if (n.verification && n.verification.agent !== 'none') {
         n.verification = { ...n.verification, agent: 'stale' };
       }
+    }
+    if (patch.note !== undefined && patch.note !== n.note) {
+      n.note = patch.note;
+      changed.push('note');
     }
     if (changed.length) this.push(nodeId, 'edit', `Edited ${changed.join(', ')}`);
   }

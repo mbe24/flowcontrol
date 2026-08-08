@@ -62,7 +62,7 @@
     }
     if (e.key === 'F2' && app.selectedId) {
       e.preventDefault();
-      app.renameId = app.selectedId;
+      app.focusTarget = { section: 'title' };
     }
     if (e.key === '\\' && app.selectedId && !mobile) {
       app.panelMode = app.panelMode === 'peek' ? 'expanded' : 'peek';

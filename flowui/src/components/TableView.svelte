@@ -8,11 +8,12 @@
 
   const index = $derived(buildIndex(app.nodes, app.deps));
   const allWps = $derived(workPackages(app.nodes));
-  const wps = $derived(
-    allWps
-      .filter((w) => app.showArchived || (w.state !== 'DONE' && w.state !== 'ARCHIVED'))
-      .filter((w) => !app.wpFilter.length || app.wpFilter.includes(w.id))
-  );
+  const inFilter = (w: FlowNode) => !app.wpFilter.length || app.wpFilter.includes(w.id);
+  const isFinished = (w: FlowNode) => w.state === 'DONE' || w.state === 'ARCHIVED';
+  /** Live packages, then the disclosure row, then the finished ones below it. */
+  const liveWps = $derived(allWps.filter((w) => !isFinished(w)).filter(inFilter));
+  const doneWps = $derived(allWps.filter(isFinished).filter(inFilter));
+  const wps = $derived(app.showArchived ? [...liveWps, ...doneWps] : liveWps);
   const hidden = $derived(allWps.filter((w) => w.state === 'DONE' || w.state === 'ARCHIVED').length);
   const mobile = $derived(app.width < 860);
   const narrow = $derived(app.panelMode === 'expanded' && !!app.selectedId && !mobile);
@@ -80,7 +81,7 @@
   <EmptyState kind="filtered" />
 {:else if mobile}
   <div class="cards">
-    {#each wps as wp (wp.id)}
+    {#each liveWps as wp (wp.id)}
       {@const counts = wpCounts(app.nodes, wp.id)}
       {@const tasks = visibleTasks(wp.id)}
       <div class="cardwp">
@@ -141,6 +142,40 @@
           onEscalate={(title) => (app.dialog = { kind: 'create', nodeType: 'TASK', parentId: wp.id, title })} />
       {/if}
     {/each}
+    {#if hidden > 0}
+      <button class="marchived" onclick={() => (app.showArchived = !app.showArchived)}>
+        <span class="caret">{app.showArchived ? '▾' : '▸'}</span>
+        {hidden} completed work {hidden === 1 ? 'package' : 'packages'}
+      </button>
+      {#if app.showArchived}
+        {#each doneWps as wp (wp.id)}
+          {@const counts = wpCounts(app.nodes, wp.id)}
+          <div class="cardwp">
+            <button class="wphead" onclick={() => toggleWp(wp.id)}>
+              <span class="caret">{app.expandedWp[wp.id] ? '▾' : '▸'}</span>
+              <span class="wpname dim">{wp.title}</span>
+              <span class="mono wppct">{counts.pct}%</span>
+            </button>
+          </div>
+          {#if app.expandedWp[wp.id]}
+            {#each visibleTasks(wp.id) as t (t.id)}
+              <button class="card" onclick={() => select(t.id)}>
+                <div class="cmeta">
+                  <span class="cdot" style:background={STATUS_VAR[t.status]}></span>
+                  <span class="mono cid">{t.id}</span>
+                </div>
+                <span class="ctitle" style:color="var(--fg2)">{t.title}</span>
+              </button>
+            {/each}
+          {/if}
+        {/each}
+      {/if}
+    {/if}
+    <button
+      class="mnewwp"
+      onclick={() => (app.dialog = { kind: 'create', nodeType: 'WORK_PACKAGE', parentId: null, title: '' })}>
+      <span class="plus">+</span>New work package
+    </button>
     <p class="hint">Swipe a card right to mark DONE, left to toggle BLOCKED.</p>
   </div>
 {:else if narrow}
@@ -172,7 +207,29 @@
   </div>
 
   <div class="scroll">
-    {#each wps as wp (wp.id)}
+    {@render wpGroup(liveWps)}
+
+    {#if hidden > 0}
+      <button class="archived" onclick={() => (app.showArchived = !app.showArchived)}>
+        <span class="caret">{app.showArchived ? '▾' : '▸'}</span>
+        {hidden} completed work {hidden === 1 ? 'package' : 'packages'}
+        <span class="mono done">100%</span>
+      </button>
+      {#if app.showArchived}
+        {@render wpGroup(doneWps)}
+      {/if}
+    {/if}
+
+    <button
+      class="newwp"
+      onclick={() => (app.dialog = { kind: 'create', nodeType: 'WORK_PACKAGE', parentId: null, title: '' })}>
+      <span class="plus">+</span>New work package
+    </button>
+  </div>
+{/if}
+
+{#snippet wpGroup(group: FlowNode[])}
+  {#each group as wp (wp.id)}
       {@const counts = wpCounts(app.nodes, wp.id)}
       {@const tasks = visibleTasks(wp.id)}
       <div
@@ -303,23 +360,9 @@
           label={tasks.length === 0 ? 'Add the first task…' : `Add task to ${wp.title}`}
           onEscalate={(title) => (app.dialog = { kind: 'create', nodeType: 'TASK', parentId: wp.id, title })} />
       {/if}
-    {/each}
 
-    {#if hidden > 0}
-      <button class="archived" onclick={() => (app.showArchived = !app.showArchived)}>
-        <span class="caret">{app.showArchived ? '▾' : '▸'}</span>
-        {hidden} completed work {hidden === 1 ? 'package' : 'packages'}
-        <span class="mono done">100%</span>
-      </button>
-    {/if}
-
-    <button
-      class="newwp"
-      onclick={() => (app.dialog = { kind: 'create', nodeType: 'WORK_PACKAGE', parentId: null, title: '' })}>
-      <span class="plus">+</span>New work package
-    </button>
-  </div>
-{/if}
+  {/each}
+{/snippet}
 
 <style>
   .head,
@@ -780,6 +823,28 @@
     background: var(--chip);
     border: 1px solid var(--border);
     color: var(--fg2);
+  }
+  .marchived,
+  .mnewwp {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 4px;
+    background: transparent;
+    border: 0;
+    color: var(--fg3);
+    font-family: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .mnewwp {
+    color: var(--accent);
+  }
+  .wpname.dim {
+    color: var(--fg3);
   }
   .hint {
     margin: 4px 2px 14px;

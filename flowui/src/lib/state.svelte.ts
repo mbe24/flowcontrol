@@ -7,7 +7,8 @@ import type {
   HumanVerdict,
   NodeType,
   Project,
-  Status
+  Status,
+  WPState
 } from './types';
 
 /** Swap this for a client that talks to the Rust core. */
@@ -25,6 +26,11 @@ export type PanelMode = 'peek' | 'expanded';
 export type SheetMode = 'closed' | 'peek' | 'full';
 
 /** Every modal in the app is one of these. */
+/** Which section of the detail panel to reveal when it opens. */
+export type FocusTarget =
+  | { section: 'title' | 'deps' | 'steps'; nodeId?: string; field?: 'title' | 'condition' | 'note' }
+  | null;
+
 export type Dialog =
   | { kind: 'create'; nodeType: NodeType; parentId: string | null; title: string }
   | { kind: 'delete'; nodeId: string }
@@ -102,13 +108,19 @@ export const app = $state({
   expandedTask: { 'T-1042': true } as Record<string, boolean>,
   expandedStep: {} as Record<string, boolean>,
 
+  /**
+   * Why the detail panel was opened, so it can scroll to and focus the right
+   * section. Every NodeMenu item used to just set selectedId, which made
+   * "Add dependency" look broken — the picker was there, below the fold.
+   * DetailBody consumes this once on mount and clears it.
+   */
+  focusTarget: null as FocusTarget,
+
   /** Set when a human override would contradict an agent failure. */
   confirmOverride: null as string | null,
   dialog: null as Dialog,
   projectMenuOpen: false,
   nodeMenuFor: null as string | null,
-  /** Set to start inline title editing from the node menu; cleared on start. */
-  renameId: null as string | null,
   /** Viewport coords the node menu opens at. */
   menuAt: { x: 0, y: 0 },
   draftComment: '',
@@ -220,6 +232,13 @@ export async function setVerdict(id: string, verdict: HumanVerdict) {
   await refresh();
 }
 
+/** Work packages have a lifecycle, not a Status. */
+export async function setWpState(id: string, state: WPState) {
+  await store.setWpState(id, state);
+  await refresh();
+  app.flash = `${id} → ${state}`;
+}
+
 export async function submitComment(id: string) {
   const text = app.draftComment.trim();
   if (!text) return;
@@ -323,14 +342,36 @@ export function toggleStep(id: string) {
   app.expandedStep[id] = !app.expandedStep[id];
 }
 
-export function select(id: string | null) {
+export function select(id: string | null, focus: FocusTarget = null) {
   app.selectedId = id;
-  if (id && isMobile()) app.sheet = 'peek';
+  app.focusTarget = focus;
+  if (id && isMobile()) app.sheet = focus ? 'full' : 'peek';
   if (!id) app.sheet = 'closed';
+}
+
+/**
+ * Rename a step: select its owning task, then point the focus at the step.
+ * Falls back to selecting the node itself if it has no parent.
+ */
+export function renameNode(node: FlowNode) {
+  if (node.type === 'STEP' && node.parentId) {
+    select(node.parentId, { section: 'steps', nodeId: node.id, field: 'title' });
+    app.expandedStep[node.id] = true;
+  } else {
+    select(node.id, { section: 'title' });
+  }
+}
+
+/** Read-and-clear, so the focus fires once per open rather than every render. */
+export function takeFocusTarget(): FocusTarget {
+  const t = app.focusTarget;
+  app.focusTarget = null;
+  return t;
 }
 
 export function closeDetail() {
   app.selectedId = null;
+  app.focusTarget = null;
   app.sheet = 'closed';
 }
 

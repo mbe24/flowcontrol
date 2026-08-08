@@ -5,7 +5,8 @@ import type {
   HumanVerdict,
   NodeType,
   Project,
-  Status
+  Status,
+  WPState
 } from './types';
 
 export interface NewNode {
@@ -21,6 +22,8 @@ export interface NodePatch {
   title?: string;
   description?: string[];
   condition?: string;
+  /** STEP only — its body/detail (a few sentences, shown on expand). */
+  note?: string;
 }
 
 /**
@@ -41,6 +44,8 @@ export interface FlowStore {
   setStatus(nodeId: string, status: Status): Promise<void>;
   /** Records the human's acceptance or rejection of a condition. */
   setVerdict(nodeId: string, verdict: HumanVerdict): Promise<void>;
+  /** Work-package lifecycle. Separate from Status, which packages don't use. */
+  setWpState(nodeId: string, state: WPState): Promise<void>;
   addComment(nodeId: string, text: string): Promise<void>;
 
   createNode(input: NewNode): Promise<string>;
