@@ -42,19 +42,19 @@ const (
 type AgentResult string
 
 const (
-	Pass      AgentResult = "pass"
-	Fail      AgentResult = "fail"
-	Stale     AgentResult = "stale"
-	NoReport  AgentResult = "none"
+	Pass     AgentResult = "pass"
+	Fail     AgentResult = "fail"
+	Stale    AgentResult = "stale"
+	NoReport AgentResult = "none"
 )
 
 // HumanVerdict is the operator's explicit acceptance, independent of the agent.
 type HumanVerdict string
 
 const (
-	Accepted   HumanVerdict = "accepted"
-	Rejected   HumanVerdict = "rejected"
-	NoVerdict  HumanVerdict = "none"
+	Accepted  HumanVerdict = "accepted"
+	Rejected  HumanVerdict = "rejected"
+	NoVerdict HumanVerdict = "none"
 )
 
 type Verification struct {
@@ -152,6 +152,23 @@ type Store interface {
 	CreateProject(ctx context.Context, name, description string, seed bool) (string, error)
 	// CreateNode adds a child node and returns its id.
 	CreateNode(ctx context.Context, n NewNode) (string, error)
+	// UpdateNode applies the non-nil fields of updates (title / condition).
+	// Editing a condition marks the agent report stale.
+	UpdateNode(ctx context.Context, nodeID string, updates NodeUpdate) error
+	// DeleteNode removes a node and (in the engine's model) its descendants
+	// and edges. The TUI confirms collateral first.
+	DeleteNode(ctx context.Context, nodeID string) error
+	// AddDependency records that blocker must finish before blocked.
+	AddDependency(ctx context.Context, blockerID, blockedID string) error
+	// RemoveDependency drops one directed blocker → blocked edge.
+	RemoveDependency(ctx context.Context, blockerID, blockedID string) error
+}
+
+// NodeUpdate carries the editable fields for UpdateNode. Nil fields are left
+// untouched so a caller edits only what changed.
+type NodeUpdate struct {
+	Title     *string
+	Condition *string
 }
 
 // Badge resolves an agent report and a human verdict into one display state.

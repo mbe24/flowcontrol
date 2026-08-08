@@ -232,3 +232,83 @@ func TestGRPCCreateProjectUnsupported(t *testing.T) {
 	_, err := g.CreateProject(context.Background(), "New App", "desc", true)
 	require.Error(t, err)
 }
+
+// --- UpdateNode RPC ----------------------------------------------------------
+
+func TestGRPCUpdateNodeTitle(t *testing.T) {
+	mc := new(mockClient)
+	g := NewGRPCWithClient(mc, "mbe")
+
+	title := "New title"
+	mc.On("UpdateNode", mock.Anything, mock.MatchedBy(func(req *flowv1.UpdateNodeRequest) bool {
+		return req.NodeId == "T-1042" &&
+			req.Meta != nil && req.Meta.Author == "mbe" &&
+			len(req.UpdateMask) == 1 && req.UpdateMask[0] == "title" &&
+			req.Title == "New title" && req.Condition == ""
+	})).Return(&flowv1.UpdateNodeResponse{}, nil).Once()
+
+	err := g.UpdateNode(context.Background(), "T-1042", NodeUpdate{Title: &title})
+	require.NoError(t, err)
+	mc.AssertExpectations(t)
+}
+
+func TestGRPCUpdateNodeCondition(t *testing.T) {
+	mc := new(mockClient)
+	g := NewGRPCWithClient(mc, "mbe")
+
+	cond := "npm test"
+	mc.On("UpdateNode", mock.Anything, mock.MatchedBy(func(req *flowv1.UpdateNodeRequest) bool {
+		return req.NodeId == "T-1042" &&
+			len(req.UpdateMask) == 1 && req.UpdateMask[0] == "condition" &&
+			req.Condition == "npm test" && req.Title == ""
+	})).Return(&flowv1.UpdateNodeResponse{}, nil).Once()
+
+	err := g.UpdateNode(context.Background(), "T-1042", NodeUpdate{Condition: &cond})
+	require.NoError(t, err)
+	mc.AssertExpectations(t)
+}
+
+// --- DeleteNode RPC ----------------------------------------------------------
+
+func TestGRPCDeleteNode(t *testing.T) {
+	mc := new(mockClient)
+	g := NewGRPCWithClient(mc, "mbe")
+
+	mc.On("DeleteNode", mock.Anything, mock.MatchedBy(func(req *flowv1.DeleteNodeRequest) bool {
+		return req.NodeId == "T-1042" && req.Meta != nil && req.Meta.Author == "mbe"
+	})).Return(&flowv1.DeleteNodeResponse{}, nil).Once()
+
+	err := g.DeleteNode(context.Background(), "T-1042")
+	require.NoError(t, err)
+	mc.AssertExpectations(t)
+}
+
+// --- AddDependency / RemoveDependency RPC ------------------------------------
+
+func TestGRPCAddDependency(t *testing.T) {
+	mc := new(mockClient)
+	g := NewGRPCWithClient(mc, "mbe")
+
+	mc.On("AddDependency", mock.Anything, mock.MatchedBy(func(req *flowv1.AddDependencyRequest) bool {
+		return req.BlockerId == "T-1041" && req.BlockedId == "T-1042" &&
+			req.Meta != nil && req.Meta.Author == "mbe"
+	})).Return(&flowv1.AddDependencyResponse{}, nil).Once()
+
+	err := g.AddDependency(context.Background(), "T-1041", "T-1042")
+	require.NoError(t, err)
+	mc.AssertExpectations(t)
+}
+
+func TestGRPCRemoveDependency(t *testing.T) {
+	mc := new(mockClient)
+	g := NewGRPCWithClient(mc, "mbe")
+
+	mc.On("RemoveDependency", mock.Anything, mock.MatchedBy(func(req *flowv1.RemoveDependencyRequest) bool {
+		return req.BlockerId == "T-1041" && req.BlockedId == "T-1042" &&
+			req.Meta != nil && req.Meta.Author == "mbe"
+	})).Return(&flowv1.RemoveDependencyResponse{}, nil).Once()
+
+	err := g.RemoveDependency(context.Background(), "T-1041", "T-1042")
+	require.NoError(t, err)
+	mc.AssertExpectations(t)
+}

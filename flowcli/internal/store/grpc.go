@@ -184,6 +184,61 @@ func (g *GRPC) CreateNode(ctx context.Context, n NewNode) (string, error) {
 	return "", nil
 }
 
+func (g *GRPC) UpdateNode(ctx context.Context, nodeID string, updates NodeUpdate) error {
+	req := &flowv1.UpdateNodeRequest{
+		Meta:   &flowv1.WriteMeta{Author: g.who},
+		NodeId: nodeID,
+	}
+	if updates.Title != nil {
+		req.UpdateMask = append(req.UpdateMask, "title")
+		req.Title = *updates.Title
+	}
+	if updates.Condition != nil {
+		req.UpdateMask = append(req.UpdateMask, "condition")
+		req.Condition = *updates.Condition
+	}
+	_, err := g.c.UpdateNode(ctx, req)
+	if err == nil {
+		g.invalidate()
+	}
+	return err
+}
+
+func (g *GRPC) DeleteNode(ctx context.Context, nodeID string) error {
+	_, err := g.c.DeleteNode(ctx, &flowv1.DeleteNodeRequest{
+		Meta:   &flowv1.WriteMeta{Author: g.who},
+		NodeId: nodeID,
+	})
+	if err == nil {
+		g.invalidate()
+	}
+	return err
+}
+
+func (g *GRPC) AddDependency(ctx context.Context, blockerID, blockedID string) error {
+	_, err := g.c.AddDependency(ctx, &flowv1.AddDependencyRequest{
+		Meta:      &flowv1.WriteMeta{Author: g.who},
+		BlockerId: blockerID,
+		BlockedId: blockedID,
+	})
+	if err == nil {
+		g.invalidate()
+	}
+	return err
+}
+
+func (g *GRPC) RemoveDependency(ctx context.Context, blockerID, blockedID string) error {
+	_, err := g.c.RemoveDependency(ctx, &flowv1.RemoveDependencyRequest{
+		Meta:      &flowv1.WriteMeta{Author: g.who},
+		BlockerId: blockerID,
+		BlockedId: blockedID,
+	})
+	if err == nil {
+		g.invalidate()
+	}
+	return err
+}
+
 func toNodeKind(t NodeType) flowv1.NodeKind {
 	switch t {
 	case WorkPackage:

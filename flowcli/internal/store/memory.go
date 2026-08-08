@@ -376,6 +376,109 @@ func (m *Memory) CreateNode(_ context.Context, n NewNode) (string, error) {
 	return id, nil
 }
 
+func (m *Memory) UpdateNode(_ context.Context, nodeID string, updates NodeUpdate) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.nodes {
+		if m.nodes[i].ID != nodeID {
+			continue
+		}
+		if updates.Title != nil {
+			m.nodes[i].Title = *updates.Title
+			m.push(nodeID, ActEdit, "Updated the title")
+		}
+		if updates.Condition != nil {
+			m.nodes[i].Condition = *updates.Condition
+			// Editing the condition invalidates the last agent report.
+			m.nodes[i].Verification.Agent = NoReport
+			m.nodes[i].Verification.AgentName = ""
+			m.nodes[i].Verification.AgentWhen = ""
+			m.push(nodeID, ActEdit, "Edited the condition — agent report marked stale")
+		}
+		return nil
+	}
+	return fmt.Errorf("node not found: %s", nodeID)
+}
+
+// DeleteNode removes a node, its descendants, and every edge touching them.
+// The engine owns cascade semantics; the memory store mirrors them so the
+// demo behaves like the real thing.
+func (m *Memory) DeleteNode(_ context.Context, nodeID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	toDelete := map[string]bool{nodeID: true}
+	found := false
+	for _, n := range m.nodes {
+		if n.ID == nodeID {
+			found = true
+		}
+	}
+	if !found {
+		return fmt.Errorf("node not found: %s", nodeID)
+	}
+
+	// Collect descendants greedily: a child whose parent is already marked.
+	changed := true
+	for changed {
+		changed = false
+		for _, n := range m.nodes {
+			if toDelete[n.ParentID] && !toDelete[n.ID] {
+				toDelete[n.ID] = true
+				changed = true
+			}
+		}
+	}
+
+	kept := m.nodes[:0]
+	for _, n := range m.nodes {
+		if !toDelete[n.ID] {
+			kept = append(kept, n)
+		}
+	}
+	m.nodes = kept
+
+	edges := m.deps[:0]
+	for _, d := range m.deps {
+		if !toDelete[d.BlockerID] && !toDelete[d.BlockedID] {
+			edges = append(edges, d)
+		}
+	}
+	m.deps = edges
+
+	m.push(nodeID, ActStatus, "Deleted "+nodeID+" and its descendants")
+	return nil
+}
+
+func (m *Memory) AddDependency(_ context.Context, blockerID, blockedID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// No-op if the edge already exists (dedupe).
+	for _, d := range m.deps {
+		if d.BlockerID == blockerID && d.BlockedID == blockedID {
+			return nil
+		}
+	}
+	m.deps = append(m.deps, Dependency{BlockerID: blockerID, BlockedID: blockedID})
+	m.push(blockedID, ActStatus, fmt.Sprintf("Now blocked by %s", blockerID))
+	return nil
+}
+
+func (m *Memory) RemoveDependency(_ context.Context, blockerID, blockedID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	kept := m.deps[:0]
+	for _, d := range m.deps {
+		if d.BlockerID == blockerID && d.BlockedID == blockedID {
+			continue
+		}
+		kept = append(kept, d)
+	}
+	m.deps = kept
+	m.push(blockedID, ActStatus, fmt.Sprintf("No longer blocked by %s", blockerID))
+	return nil
+}
+
 // push prepends an activity entry. Caller holds the lock.
 func (m *Memory) push(nodeID string, kind ActivityKind, text string) {
 	m.seq++

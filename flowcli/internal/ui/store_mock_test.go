@@ -62,3 +62,23 @@ func (m *mockStore) CreateNode(ctx context.Context, n store.NewNode) (string, er
 	args := m.Called(ctx, n)
 	return args.String(0), args.Error(1)
 }
+
+func (m *mockStore) UpdateNode(ctx context.Context, nodeID string, updates store.NodeUpdate) error {
+	args := m.Called(ctx, nodeID, updates)
+	return args.Error(0)
+}
+
+func (m *mockStore) DeleteNode(ctx context.Context, nodeID string) error {
+	args := m.Called(ctx, nodeID)
+	return args.Error(0)
+}
+
+func (m *mockStore) AddDependency(ctx context.Context, blockerID, blockedID string) error {
+	args := m.Called(ctx, blockerID, blockedID)
+	return args.Error(0)
+}
+
+func (m *mockStore) RemoveDependency(ctx context.Context, blockerID, blockedID string) error {
+	args := m.Called(ctx, blockerID, blockedID)
+	return args.Error(0)
+}
