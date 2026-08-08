@@ -16,6 +16,8 @@
   const wps = $derived(app.showArchived ? [...liveWps, ...doneWps] : liveWps);
   const hidden = $derived(allWps.filter((w) => w.state === 'DONE' || w.state === 'ARCHIVED').length);
   const mobile = $derived(app.width < 860);
+  /** Above this many steps, dots stop being countable — switch to a bar. */
+  const DOT_CAP = 8;
   const narrow = $derived(app.panelMode === 'expanded' && !!app.selectedId && !mobile);
 
   const visibleTasks = (wpId: string) => tasksOf(app.nodes, wpId).filter(passesAll);
@@ -248,6 +250,11 @@
             style:color={wp.state === 'ACTIVE' ? 'var(--ready)' : 'var(--fg2)'}
             style:background={wp.state === 'ACTIVE' ? 'var(--ready-bg)' : 'var(--chip)'}>{wp.state}</span>
         </div>
+        <div class="wpcounts">
+          {#if counts.ready}<span class="wpc"><span class="cdot2" style:background="var(--ready)"></span>{counts.ready} ready</span>{/if}
+          {#if counts.blocked}<span class="wpc"><span class="cdot2" style:background="var(--blocked)"></span>{counts.blocked} blocked</span>{/if}
+          {#if counts.deferred}<span class="wpc"><span class="cdot2" style:background="var(--deferred)"></span>{counts.deferred} deferred</span>{/if}
+        </div>
         <div class="wpbar">
           <div class="track">
             <div style:width="{pct(counts.done, counts.total)}%" style:background="var(--done)"></div>
@@ -255,9 +262,9 @@
             <div style:width="{pct(counts.blocked, counts.total)}%" style:background="var(--blocked)"></div>
             <div style:width="{pct(counts.deferred, counts.total)}%" style:background="var(--deferred)"></div>
           </div>
-          <span class="mono ratio">{counts.done}/{counts.total}</span>
-          <span class="mono pctcell">{counts.pct}%</span>
         </div>
+        <span class="mono wpratio">{counts.done}/{counts.total}</span>
+        <span class="mono wppctcell">{counts.pct}%</span>
       </div>
 
       {#if app.expandedWp[wp.id]}
@@ -306,11 +313,19 @@
               <span class="mono ellipsis">{t.condition || '—'}</span>
             </div>
             <div class="steps">
-              <div class="dots">
-                {#each steps as s (s.id)}
-                  <span class="sdot" style:background={s.status === 'DONE' ? 'var(--ready)' : 'var(--border)'}></span>
-                {/each}
-              </div>
+              {#if steps.length === 0}
+                <span class="mono nosteps">–</span>
+              {:else if steps.length <= DOT_CAP}
+                <div class="dots">
+                  {#each steps as s (s.id)}
+                    <span class="sdot" style:background={s.status === 'DONE' ? 'var(--ready)' : 'var(--border)'}></span>
+                  {/each}
+                </div>
+              {:else}
+                <div class="minibar" title="{ratio.label} steps done">
+                  <div style:width="{(ratio.done / steps.length) * 100}%"></div>
+                </div>
+              {/if}
               <span class="mono ratio">{ratio.label}</span>
             </div>
             <div class="tail">
@@ -376,7 +391,13 @@
   .row,
   .steprow {
     display: grid;
-    grid-template-columns: 22px 1fr 190px 200px 74px 104px;
+    grid-template-columns:
+      22px
+      minmax(260px, 1.6fr)
+      minmax(104px, 0.5fr)
+      minmax(200px, 1fr)
+      82px
+      104px;
     align-items: center;
     padding: 0 18px;
   }
@@ -443,11 +464,33 @@
     padding: 1px 6px;
     border-radius: 3px;
   }
-  .wpbar {
-    grid-column: 3 / span 4;
+  /* Column 3: the space that used to be empty carries a status breakdown. */
+  .wpcounts {
     display: flex;
     align-items: center;
     gap: 12px;
+    overflow: hidden;
+    padding-right: 12px;
+  }
+  .wpc {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10.5px;
+    color: var(--fg2);
+    white-space: nowrap;
+  }
+  .cdot2 {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    flex: none;
+  }
+  /* Column 4: same cell as CONDITION, so every package bar starts and ends on
+     the same x — that is what makes them comparable at a glance. */
+  .wpbar {
+    display: flex;
+    align-items: center;
     padding-right: 14px;
   }
   .track {
@@ -461,15 +504,19 @@
   .track.thin {
     height: 5px;
   }
+  .wpratio {
+    font-size: 11px;
+    color: var(--fg2);
+  }
   .ratio {
     font-size: 11px;
     color: var(--fg2);
   }
-  .pctcell {
+.wppctcell {
     font-size: 11px;
     color: var(--fg3);
-    width: 34px;
     text-align: right;
+    padding-right: 4px;
   }
   .row {
     height: 38px;
@@ -549,6 +596,25 @@
     width: 5px;
     height: 5px;
     border-radius: 1px;
+  }
+  /* ≥8 steps: dots stop being countable, so a bar is the honest
+     approximation (eight half-lit dots over a long branch read as noise). */
+  .nosteps {
+    font-size: 10px;
+    color: var(--fg3);
+    width: 34px;
+  }
+  .minibar {
+    width: 34px;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--border);
+    overflow: hidden;
+    flex: none;
+  }
+  .minibar > div {
+    height: 100%;
+    background: var(--ready);
   }
   .tail {
     display: flex;

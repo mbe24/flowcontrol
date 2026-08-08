@@ -9,6 +9,7 @@
   import GraphView from './components/GraphView.svelte';
   import DetailPanel from './components/DetailPanel.svelte';
   import DetailSheet from './components/DetailSheet.svelte';
+  import MobileViewBar from './components/MobileViewBar.svelte';
   import OverrideDialog from './components/OverrideDialog.svelte';
   import CreateNodeDialog from './components/CreateNodeDialog.svelte';
   import DeleteDialog from './components/DeleteDialog.svelte';
@@ -102,6 +103,7 @@
   </div>
 
   {#if mobile}
+    <MobileViewBar />
     <DetailSheet />
   {/if}
 
@@ -160,6 +162,10 @@
     flex-direction: column;
     min-width: 0;
     min-height: 0;
+  }
+  /* Clear the bottom view bar so the last row is never under it. */
+  .shell.mobile .views {
+    padding-bottom: calc(52px + env(safe-area-inset-bottom));
   }
   .msg {
     padding: 22px 20px;

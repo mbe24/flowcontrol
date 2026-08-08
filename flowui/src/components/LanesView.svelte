@@ -315,5 +315,12 @@
     .card {
       min-height: 64px;
     }
+    /* The shell's bottom padding can't reach inside a lane's own scroller. */
+    .cards {
+      padding-bottom: 14px;
+    }
+    .pager {
+      padding-bottom: 6px;
+    }
   }
 </style>
