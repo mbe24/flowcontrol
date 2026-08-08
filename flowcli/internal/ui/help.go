@@ -166,6 +166,12 @@ func (m Model) statusLine(km screenKeys, active Screen, inner int) string {
 	}
 	m.help.Width = avail
 	left := m.help.ShortHelpView(km.ShortHelp())
+	// Don't rely solely on help's internal truncation — bubbles v1.0.0 can
+	// let an oversized final item blow past the width. Cap it to `avail`
+	// ourselves (ANSI-preserving) so the row always closes at `inner`.
+	if wlen(left) > avail {
+		left = truncANSI(left, avail)
+	}
 	fill := avail - wlen(left)
 	if fill < 0 {
 		fill = 0
