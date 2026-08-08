@@ -9,12 +9,28 @@
     placeholder?: string;
     multiline?: boolean;
     klass?: string;
+    /** Begin editing immediately (e.g. Rename from the node menu). */
+    autostart?: boolean;
+    onStarted?: () => void;
   }
-  let { nodeId, field, value, placeholder = 'empty', multiline = false, klass = '' }: Props = $props();
+  let { nodeId, field, value, placeholder = 'empty', multiline = false, klass = '', autostart = false, onStarted }: Props = $props();
 
   let editing = $state(false);
   let draft = $state('');
   let el: HTMLInputElement | HTMLTextAreaElement | undefined = $state();
+
+  function begin() {
+    draft = value;
+    editing = true;
+    queueMicrotask(() => el?.focus());
+  }
+
+  $effect(() => {
+    if (autostart && !editing) {
+      begin();
+      onStarted?.();
+    }
+  });
 
   function start() {
     draft = value;

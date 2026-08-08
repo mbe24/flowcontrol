@@ -60,6 +60,10 @@
       const sel = app.nodes.find((n) => n.id === app.selectedId);
       if (sel) app.dialog = { kind: 'create', nodeType: 'STEP', parentId: sel.id, title: '' };
     }
+    if (e.key === 'F2' && app.selectedId) {
+      e.preventDefault();
+      app.renameId = app.selectedId;
+    }
     if (e.key === '\\' && app.selectedId && !mobile) {
       app.panelMode = app.panelMode === 'peek' ? 'expanded' : 'peek';
     }

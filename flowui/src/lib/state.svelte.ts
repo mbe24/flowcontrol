@@ -107,6 +107,8 @@ export const app = $state({
   dialog: null as Dialog,
   projectMenuOpen: false,
   nodeMenuFor: null as string | null,
+  /** Set to start inline title editing from the node menu; cleared on start. */
+  renameId: null as string | null,
   /** Viewport coords the node menu opens at. */
   menuAt: { x: 0, y: 0 },
   draftComment: '',

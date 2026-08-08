@@ -90,7 +90,7 @@
 
     <div class="title" class:big={wide}>
       <span class="dot" style:background={STATUS_VAR[node.status]}></span>
-      <h1><EditableField nodeId={node.id} field="title" value={node.title} placeholder="Untitled" /></h1>
+      <h1><EditableField nodeId={node.id} field="title" value={node.title} placeholder="Untitled" autostart={app.renameId === node.id} onStarted={() => (app.renameId = null)} /></h1>
     </div>
 
     <div class="statusrow" class:inline={wide}>

@@ -23,8 +23,23 @@
   );
 
   function act(fn: () => void) {
-    onclose();
+    // Run the action before onclose: closing nulls nodeMenuFor, which makes the
+    // `node` prop undefined, so the action must read node.id while it is valid.
     fn();
+    onclose();
+  }
+
+  // Edge sometimes swallows the `click` that follows a context-menu gesture, so
+  // act on mousedown (fires with the press) instead of onclick.
+  const go = (fn: () => void) => (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    act(fn);
+  };
+
+  function rename() {
+    app.selectedId = node.id;
+    app.renameId = node.id;
   }
 
   function create(type: NodeType, parentId: string) {
@@ -34,20 +49,20 @@
 
 <div class="scrim" onclick={onclose} oncontextmenu={(e) => { e.preventDefault(); onclose(); }} role="presentation"></div>
 <div class="menu" class:sheet={mobile} style:left={mobile ? undefined : `${x}px`} style:top={mobile ? undefined : `${y}px`} role="menu">
-  <button onclick={() => act(() => (app.selectedId = node.id))}>
+  <button onclick={go(rename)}>
     <span class="mono ic">✎</span>Rename<span class="mono k">F2</span>
   </button>
 
   {#if isWp}
-    <button onclick={() => act(() => create('TASK', node.id))}>
+    <button onclick={go(() => create('TASK', node.id))}>
       <span class="mono ic">+</span>Add task
     </button>
   {/if}
   {#if isTask}
-    <button onclick={() => act(() => create('STEP', node.id))}>
+    <button onclick={go(() => create('STEP', node.id))}>
       <span class="mono ic">+</span>Add step
     </button>
-    <button onclick={() => act(() => (app.selectedId = node.id))}>
+    <button onclick={go(() => { app.selectedId = node.id; })}>
       <span class="mono ic">⇄</span>Add dependency
     </button>
   {/if}
@@ -55,7 +70,7 @@
   <div class="sep"></div>
 
   {#if isStep}
-    <button onclick={() => act(() => (app.dialog = { kind: 'move', nodeId: node.id, to: 'TASK' }))}>
+    <button onclick={go(() => { app.dialog = { kind: 'move', nodeId: node.id, to: 'TASK' }; })}>
       <span class="mono ic">↑</span>Promote to task<span class="mono k">⇧⇥</span>
     </button>
   {/if}
@@ -63,17 +78,17 @@
     <button
       disabled={!canDemote}
       title={canDemote ? '' : 'No other task in this package to demote into'}
-      onclick={() => canDemote && act(() => (app.dialog = { kind: 'move', nodeId: node.id, to: 'STEP' }))}>
+      onclick={go(() => { app.dialog = { kind: 'move', nodeId: node.id, to: 'STEP' }; })}>
       <span class="mono ic">↓</span>Demote to step<span class="mono k">⇥</span>
     </button>
-    <button onclick={() => act(() => (app.dialog = { kind: 'move', nodeId: node.id, to: 'TASK' }))}>
+    <button onclick={go(() => { app.dialog = { kind: 'move', nodeId: node.id, to: 'TASK' }; })}>
       <span class="mono ic">↗</span>Move to package…
     </button>
   {/if}
 
   <div class="sep"></div>
 
-  <button class="danger" onclick={() => act(() => (app.dialog = { kind: 'delete', nodeId: node.id }))}>
+  <button class="danger" onclick={go(() => { app.dialog = { kind: 'delete', nodeId: node.id }; })}>
     <span class="mono ic">✕</span>Delete<span class="mono k">⌫</span>
   </button>
 </div>
@@ -126,17 +141,19 @@
     background: color-mix(in oklab, var(--blocked) 10%, transparent);
   }
   .ic {
-    width: 14px;
-    font-size: 11px;
+    width: 20px;
+    font-size: 14px;
+    line-height: 1;
     color: var(--fg3);
     flex: none;
+    text-align: center;
   }
   .danger .ic {
     color: var(--blocked);
   }
   .k {
     margin-left: auto;
-    font-size: 10px;
+    font-size: 12px;
     color: var(--fg3);
   }
   .sep {
