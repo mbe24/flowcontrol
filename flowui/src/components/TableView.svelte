@@ -442,6 +442,10 @@
   }
   .right {
     text-align: right;
+    /* Align the "Status" label with the task/step status text: each row's
+       trailing ⋯ button (20px) + its 4px gap means the label has to keep the
+       same 24px room on the right as the status text does. */
+    padding-right: 24px;
   }
   .scroll {
     flex: 1;
@@ -549,7 +553,9 @@
     font-size: 11px;
     color: var(--fg3);
     text-align: right;
-    padding-right: 4px;
+    /* Same 24px reservation as .right and the rows' status text, so the WP %
+       lines up with the task/step status above/below it. */
+    padding-right: 24px;
   }
   .row {
     height: 38px;
