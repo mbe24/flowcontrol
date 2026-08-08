@@ -1,4 +1,5 @@
 import { MemoryStore } from './memory';
+import { RemoteStore } from './remote';
 import type { FlowStore, NewNode, NodePatch } from './store';
 import type {
   ActivityEntry,
@@ -12,7 +13,8 @@ import type {
 } from './types';
 
 /** Swap this for a client that talks to the Rust core. */
-export let store: FlowStore = new MemoryStore();
+/** Memory for the demo build (no backend); the real app talks to the core. */
+export let store: FlowStore = import.meta.env.VITE_DEMO ? new MemoryStore() : new RemoteStore();
 
 /** Swap the store (tests inject a mocked FlowStore). */
 export function setStore(s: FlowStore) {
