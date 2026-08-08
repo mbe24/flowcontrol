@@ -13,23 +13,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v5
+- uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: flowui/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        working-directory: flowui
         run: npm ci
 
       - name: Type + Svelte check
-        working-directory: flowui
-        run: npm run check
+        run: npm run check -w flowui
 
       - name: Build
-        working-directory: flowui
-        run: npm run build
+        run: npm run build -w flowui
 
   go:
     name: Go TUI (flowcli · vet · build)

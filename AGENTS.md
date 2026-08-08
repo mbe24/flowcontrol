@@ -11,6 +11,12 @@ Use Conventional Commits with a scope on the enclosing directory. Imperative moo
 - Scope: the component you touched, e.g. `flowcli`, `flowd`, `flowmcp`, `flowui`, `proto`, `plan`
 - Example: `chore(flowcli): add go.sum to fix first build`
 
+## Validation before committing
+
+Run quick type checks, format checks, and unit tests after a series of commits
+(see the per-component scripts; the repo is an npm workspace — run npm scripts
+at the repo root with `-w <package>`).
+
 ## DeepSeek
 
 Instructions for working in this, i.e. Codex, harness.
