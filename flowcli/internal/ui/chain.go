@@ -258,8 +258,10 @@ func (m Model) viewChain(w, h int) string {
 			line += "  " + lipgloss.NewStyle().Foreground(styles.Hues[1]).Render(r.crossWP)
 		}
 		if sel {
-			line = styles.SelS.Render(pad(stripANSI(line), inner))
-			line = styles.SelS.Render(gutter) + dot + " " + styles.AccentS.Render(r.node.ID) + "  " + styles.BrightS.Render(r.node.Title)
+			// Pad to the full row width first, then let selectedLine strip the
+			// per-segment resets so the selection background spans the whole
+			// line while preserving each segment's foreground colour.
+			line = selectedLine(pad(line, inner))
 		}
 		body = append(body, line)
 	}
