@@ -27,16 +27,17 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: flowui/package-lock.json
+          cache-dependency-path: package-lock.json
 
+      - name: Install dependencies (workspace root)
+        run: npm ci
+
+      # Demo build: in-memory fixtures (no backend) — build:demo (VITE_DEMO=1).
       # BASE_PATH = the project-site subpath (/<repo>); a user/org site would use "".
-      - name: Install + build the web app
-        working-directory: flowui
+      - name: Build the web app demo
         env:
           BASE_PATH: /${{ github.event.repository.name }}
-        run: |
-          npm ci
-          npm run build
+        run: npm run build:demo -w flowui
 
       - uses: actions/configure-pages@v5
 
