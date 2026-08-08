@@ -215,6 +215,15 @@ func (m Model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showDone = !m.showDone
 		m.buildRows()
 	}
+	// Keep the cursor visible within the scroll window. The tree reserves
+	// `height-4` body rows in frame(); of those, the summary line and the
+	// rule take two, and a "completed WPs" line takes one when present.
+	win := m.treeVisibleRows()
+	if m.cursor < m.treeScroll {
+		m.treeScroll = m.cursor
+	} else if m.cursor >= m.treeScroll+win {
+		m.treeScroll = m.cursor - win + 1
+	}
 	if len(m.rows) > 0 {
 		m.selectedID = m.ownerTask(m.rows[m.cursor].node).ID
 	}

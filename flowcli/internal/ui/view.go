@@ -183,7 +183,19 @@ func (m Model) viewTree(w, h int) string {
 	body = append(body, summary)
 	body = append(body, styles.DimS.Render(strings.Repeat("─", inner)))
 
-	for i, rw := range m.rows {
+	// Vertical scrolling: show a window of m.rows starting at treeScroll. The
+	// window width is computed to leave room for the summary+rule header rows
+	// and the optional "completed WPs" line inside frame()'s body area.
+	window := m.rows
+	if m.treeScroll > 0 {
+		if m.treeScroll >= len(window) {
+			m.treeScroll = max(0, len(window)-1)
+		}
+		window = window[m.treeScroll:]
+	}
+
+	for i0, rw := range window {
+		i := i0 + m.treeScroll
 		sel := i == m.cursor
 		if rw.isWP {
 			caret := "▸"
@@ -250,6 +262,53 @@ func (m Model) viewTree(w, h int) string {
 	keys := m.statusLine(treeKeys(), m.screen, inner)
 	title := "flowcli ─ " + m.projectName()
 	return frame(title, body, keys, inner, h)
+}
+
+// treeVisibleRows reports how many m.rows fit in the tree's body area. frame()
+// reserves height-4 body rows; the summary line, the colored rule, and (when
+// hidden WPs are folded) a "completed work packages" line consume some of them.
+// Blocked tasks add a "blocked by" sub-line, so the number of visible original
+// rows is fewer than the row count would suggest.
+func (m Model) treeVisibleRows() int {
+	room := m.height - 4 - treeSummaryRows
+	if !m.showDone && m.hiddenWPCount() > 0 {
+		room--
+	}
+	// Count how many original rows fit once each blocked task's sub-line is
+	// included. This mirrors viewTree: a blocked task renders row + sub-line.
+	rows := 0
+	lines := 0
+	for rows < len(m.rows) {
+		lines++
+		if m.blockerLine(m.rows[rows].node.ID) {
+			lines++
+		}
+		if lines >= room {
+			break
+		}
+		rows++
+	}
+	return max(rows+1, 1)
+}
+
+// blockerLine reports whether a task renders a "⊘ blocked by …" sub-line.
+func (m Model) blockerLine(id string) bool {
+	n, ok := m.byID[id]
+	return ok && n.Type == store.Task && n.Status == store.Blocked && len(m.blockers[id]) > 0
+}
+
+// treeSummaryRows is the number of fixed header rows above the row list
+// (the project summary line and the colored rule).
+const treeSummaryRows = 2
+
+func (m Model) hiddenWPCount() int {
+	n := 0
+	for _, wp := range m.workPackages() {
+		if wp.State == store.WPDone || wp.State == store.Archived {
+			n++
+		}
+	}
+	return n
 }
 
 func (m Model) viewDetail(w, h int) string {

@@ -100,10 +100,11 @@ type Model struct {
 	prevScreen Screen
 
 	// tree
-	rows      []row
-	cursor    int
-	collapsed map[string]bool
-	showDone  bool
+	rows       []row
+	cursor     int
+	treeScroll int
+	collapsed  map[string]bool
+	showDone   bool
 
 	// lanes
 	lane       int
