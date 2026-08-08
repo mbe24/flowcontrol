@@ -16,8 +16,9 @@
   const wps = $derived(app.showArchived ? [...liveWps, ...doneWps] : liveWps);
   const hidden = $derived(allWps.filter((w) => w.state === 'DONE' || w.state === 'ARCHIVED').length);
   const mobile = $derived(app.width < 860);
-  /** Above this many steps, dots stop being countable — switch to a bar. */
-  const DOT_CAP = 8;
+  /** On a desktop row, chips aren't counts once past 5 — switch to a bar the
+     same width as those 5 chips (5×5px + 4×2px gap = 33px). */
+  const DOT_CAP = 5;
   const narrow = $derived(app.panelMode === 'expanded' && !!app.selectedId && !mobile);
 
   /**
@@ -333,18 +334,20 @@
             <div class="steps">
               {#if steps.length === 0}
                 <span class="mono nosteps">–</span>
-              {:else if steps.length <= DOT_CAP}
-                <div class="dots">
-                  {#each steps as s (s.id)}
-                    <span class="sdot" style:background={s.status === 'DONE' ? 'var(--ready)' : 'var(--border)'}></span>
-                  {/each}
-                </div>
               {:else}
-                <div class="minibar" title="{ratio.label} steps done">
-                  <div style:width="{(ratio.done / steps.length) * 100}%"></div>
-                </div>
+                <span class="mono ratio">{ratio.label}</span>
+                {#if steps.length <= DOT_CAP}
+                  <div class="dots">
+                    {#each steps as s (s.id)}
+                      <span class="sdot" style:background={s.status === 'DONE' ? 'var(--ready)' : 'var(--border)'}></span>
+                    {/each}
+                  </div>
+                {:else}
+                  <div class="minibar" title="{ratio.label} steps done">
+                    <div style:width="{(ratio.done / steps.length) * 100}%"></div>
+                  </div>
+                {/if}
               {/if}
-              <span class="mono ratio">{ratio.label}</span>
             </div>
             <div class="tail">
               <span class="mono status" style:color={STATUS_VAR[t.status]}>{t.status}</span>
@@ -548,6 +551,11 @@
   .ratio {
     font-size: 11px;
     color: var(--fg2);
+    /* Reserve a fixed counter width so the chips/bar after it always start at
+       the same x, whatever the digit count ("3/5" and "12/34" line up the
+       same). 6ch fits "99/99"-ish ratios in the 11px mono font. */
+    min-width: 6ch;
+    display: inline-block;
   }
 .wppctcell {
     font-size: 11px;
@@ -636,15 +644,15 @@
     height: 5px;
     border-radius: 1px;
   }
-  /* ≥8 steps: dots stop being countable, so a bar is the honest
-     approximation (eight half-lit dots over a long branch read as noise). */
+  /* Over the cap (5 chips) a bar stands in for the dots, sized to the same
+     width as 5 chips so the step counter never jumps in width. */
   .nosteps {
     font-size: 10px;
     color: var(--fg3);
-    width: 34px;
+    width: 33px;
   }
   .minibar {
-    width: 34px;
+    width: 33px;
     height: 5px;
     border-radius: 3px;
     background: var(--border);
