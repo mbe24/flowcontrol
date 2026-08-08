@@ -136,6 +136,13 @@ func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
+		if m.screen == ScreenLanding {
+			// The landing decides what enter means (open the selected
+			// project or the create row). Let it fall through to the
+			// per-screen updateLanding handler below instead of opening
+			// a node's detail view.
+			break
+		}
 		if n, ok := m.current(); ok {
 			m.selectedID = m.ownerTask(n).ID
 			m.stepCursor = 0

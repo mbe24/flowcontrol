@@ -25,6 +25,11 @@ func wlen(s string) int {
 const (
 	condW  = 22 // condition text column / WP step-ratio bar width
 	ratioW = 5  // task step-counter / WP step-percent column (e.g. "18/20", "90%")
+
+	// Landing project-progress columns: done part padded so the ratio slash
+	// lines up across projects, percent right-aligned in its own column.
+	doneW = 2 // "17" — pads to a shared slash column
+	pctW  = 4 // "100%"
 )
 
 func pad(s string, w int) string {

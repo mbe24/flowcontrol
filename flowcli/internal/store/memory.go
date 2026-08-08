@@ -153,11 +153,34 @@ func NewMemory() *Memory {
 
 			{ID: "WP-BEER", ProjectID: "prj-beer", Type: WorkPackage, Title: "Cellar tracking", Status: Ready, State: Active},
 			{ID: "T-8001", ProjectID: "prj-beer", ParentID: "WP-BEER", Type: Task, Title: "Bottle inventory model",
-				Description: []string{"Track what is in the cellar and when it should be drunk."}, Status: Ready,
-				Condition: "pnpm test:cellar", Verification: none()},
+				Description: []string{"Track what is in the cellar and when it should be drunk.",
+					"One row per bottle: brew, vintage, purchase date, drink-by window and cellar position."},
+				Status: Ready, Condition: "pnpm test:cellar", Verification: none()},
+			{ID: "T-8001.1", ProjectID: "prj-beer", ParentID: "T-8001", Type: Step, Title: "Bottle schema", Status: Done,
+				Condition: "sqlite3 cellar.db \".schema bottles\"", Note: "Single table with a partial index on drink_by."},
+			{ID: "T-8001.2", ProjectID: "prj-beer", ParentID: "T-8001", Type: Step, Title: "Add/update bottle", Status: Done,
+				Condition: "pnpm test:cellar --grep upsert", Note: "Upsert keyed on (brew, vintage, position)."},
+			{ID: "T-8001.3", ProjectID: "prj-beer", ParentID: "T-8001", Type: Step, Title: "Drink-by window query", Status: Ready,
+				Condition: "pnpm test:cellar --grep window", Note: ""},
+			{ID: "T-8002", ProjectID: "prj-beer", ParentID: "WP-BEER", Type: Task, Title: "Tasting-note capture",
+				Description: []string{"Free-text notes per bottle with a 0-5 rating."}, Status: Deferred,
+				Condition: "pnpm test:cellar --grep tasting", Verification: none()},
+			{ID: "T-8002.1", ProjectID: "prj-beer", ParentID: "T-8002", Type: Step, Title: "Note field on bottle", Status: Deferred,
+				Condition: "", Note: ""},
+			{ID: "T-8002.2", ProjectID: "prj-beer", ParentID: "T-8002", Type: Step, Title: "Rating breakdown view", Status: Deferred,
+				Condition: "", Note: ""},
 			{ID: "WP-DOCS", ProjectID: "prj-docs", Type: WorkPackage, Title: "API reference", Status: Ready, State: Active},
 			{ID: "T-7001", ProjectID: "prj-docs", ParentID: "WP-DOCS", Type: Task, Title: "Generate from OpenAPI",
 				Status: Blocked, Condition: "make docs", Verification: none()},
+			{ID: "T-7001.1", ProjectID: "prj-docs", ParentID: "T-7001", Type: Step, Title: "Redoc template", Status: Done,
+				Condition: "make docs && test -f out/index.html", Note: ""},
+			{ID: "T-7001.2", ProjectID: "prj-docs", ParentID: "T-7001", Type: Step, Title: "Hosting bucket", Status: Done,
+				Condition: "aws s3 ls s3://fctrl-docs", Note: "Static site on CloudFront with a 10-minute cache."},
+			{ID: "T-7001.3", ProjectID: "prj-docs", ParentID: "T-7001", Type: Step, Title: "CI publish job", Status: Blocked,
+				Condition: "gh run list --workflow=docs", Note: "Blocked on the token scope for the release bot."},
+			{ID: "T-7002", ProjectID: "prj-docs", ParentID: "WP-DOCS", Type: Task, Title: "Changelog from git tags",
+				Description: []string{"Derive the release notes from conventional-commit ranges."}, Status: Ready,
+				Condition: "make changelog && test -s CHANGELOG.md", Verification: none()},
 		},
 		deps: []Dependency{
 			{"T-1042", "T-1043"},
@@ -188,7 +211,46 @@ func NewMemory() *Memory {
 func (m *Memory) Projects(_ context.Context) ([]Project, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return append([]Project(nil), m.projects...), nil
+
+	out := make([]Project, len(m.projects))
+	copy(out, m.projects)
+	// Fill each project's progress from the leaf nodes it owns: a task is a
+	// leaf when it has no steps, otherwise each step is a leaf.
+	for i := range out {
+		// count leaves per project
+		var done, total int
+		for _, n := range m.nodes {
+			if n.ProjectID != out[i].ID {
+				continue
+			}
+			if n.Type == Step {
+				total++
+				if n.Status == Done {
+					done++
+				}
+				continue
+			}
+			if n.Type == Task {
+				// leaf task if it has no step children
+				hasStep := false
+				for _, c := range m.nodes {
+					if c.ParentID == n.ID && c.Type == Step {
+						hasStep = true
+						break
+					}
+				}
+				if !hasStep {
+					total++
+					if n.Status == Done {
+						done++
+					}
+				}
+			}
+		}
+		out[i].Progress.Done = done
+		out[i].Progress.Total = total
+	}
+	return out, nil
 }
 
 func (m *Memory) Nodes(_ context.Context, projectID string) ([]Node, error) {

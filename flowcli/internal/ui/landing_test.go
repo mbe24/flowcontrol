@@ -7,6 +7,36 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
+// splitLines splits on newlines (kept simple; the landing has no \r).
+func splitLines(s string) []string {
+	return strings.Split(s, "\n")
+}
+
+// slashCol / pctCol report the display column (runewidth) of the first '/'
+// and '%' in a possibly-ANSI line. Byte offsets would be wrong for multi-byte
+// glyphs (e.g. the ❯ cursor), so alignment checks use display columns.
+func slashCol(s string) int {
+	w := 0
+	for _, r := range []rune(stripANSI(s)) {
+		if r == '/' {
+			return w
+		}
+		w += runewidth.RuneWidth(r)
+	}
+	return -1
+}
+
+func pctCol(s string) int {
+	w := 0
+	for _, r := range []rune(stripANSI(s)) {
+		if r == '%' {
+			return w
+		}
+		w += runewidth.RuneWidth(r)
+	}
+	return -1
+}
+
 // The landing is a screen, not a dialog: it must span the full terminal width
 // (not cap at 72), matching the tree/lanes/chain views.
 func TestLandingFullWidth(t *testing.T) {
@@ -81,3 +111,83 @@ func TestLandingListsProjectsAndCreateRow(t *testing.T) {
 		}
 	}
 }
+
+// Selecting a project on the landing must land on the TREE view (1), not pop
+// open the first work-package's detail view. Regression for: "when I select a
+// project, I should be at its tree view (1) but I'm on some empty page with
+// the title 'WP-AUTH -- Authentication Infrastructure'".
+func TestLandingEnterOpensTree(t *testing.T) {
+	m := loadModel(t)
+	m.width = 120
+	m.height = 40
+	// boot state: on the landing screen
+	m.screen = ScreenLanding
+	// load projects into the model
+	msg := m.load().(loadedMsg)
+	upd, _ := m.Update(msg)
+	m = upd.(Model)
+
+	m = press(t, m, "enter")
+	if m.screen != ScreenTree {
+		t.Fatalf("after selecting project: screen=%v, want ScreenTree (%v)",
+			m.screen, ScreenTree)
+	}
+	if m.projectID == "" {
+		t.Errorf("expected projectID to be set after selecting a project")
+	}
+	if m.overlay != OverlayNone {
+		t.Errorf("expected no overlay after selecting, got %v", m.overlay)
+	}
+}
+
+// The landing must render real progress (done/total + percent), not a dead
+// 0/0: a project with seeded subtasks must show a non-zero ratio. This pins
+// the earlier regression where landing.counts was never populated.
+func TestLandingShowsProjectProgress(t *testing.T) {
+	m := loadModel(t)
+	m.width = 120
+	m.height = 40
+
+	out := stripANSI(m.viewLanding(120, 40))
+	if strings.Contains(out, "0/0") {
+		t.Errorf("landing shows 0/0 progress; expected populated ratios: %q",
+			out)
+	}
+}
+
+// The ratio's slash and the percent must line up in shared columns so the
+// landing reads as a tidy table even though names differ in length. Regression
+// for: "the steps are not aligned and the percentages are not aligned".
+// Positions are measured in display columns (runewidth) — byte offsets would
+// mis-report the multi-byte ❯ cursor.
+func TestLandingRatioAndPercentAligned(t *testing.T) {
+	m := loadModel(t)
+	m.width = 120
+	m.height = 40
+
+	out := m.viewLanding(120, 40)
+	type col struct{ slash, pct int }
+	var cols []col
+	for _, ln := range splitLines(out) {
+		plain := stripANSI(ln)
+		if !strings.Contains(plain, "/") || !strings.Contains(plain, "%") {
+			continue
+		}
+		cols = append(cols, col{slashCol(ln), pctCol(ln)})
+	}
+	if len(cols) < 2 {
+		t.Fatalf("expected at least 2 project rows, found %d", len(cols))
+	}
+	first := cols[0]
+	for i, c := range cols[1:] {
+		if c.slash != first.slash {
+			t.Errorf("row %d slash at display col %d, want %d (ratios not aligned)",
+				i+1, c.slash, first.slash)
+		}
+		if c.pct != first.pct {
+			t.Errorf("row %d percent %% at display col %d, want %d (percents not aligned)",
+				i+1, c.pct, first.pct)
+		}
+	}
+}
+

@@ -19,9 +19,6 @@ import (
 // swap in bubbles/v2/list when project counts justify filtering and paging.
 type landingState struct {
 	cursor int
-	// counts caches per-project done/total so the rows can show progress
-	// without loading every project's nodes.
-	counts map[string][2]int
 }
 
 func (m Model) visibleProjects() []store.Project {
@@ -82,24 +79,26 @@ func (m Model) viewLanding(w, h int) string {
 			nameStyle = styles.BrightS
 		}
 
-		done, total := 0, 0
-		if c, ok := m.landing.counts[p.ID]; ok {
-			done, total = c[0], c[1]
-		}
+		done, total := p.Progress.Done, p.Progress.Total
 		pct := 0
 		if total > 0 {
 			pct = done * 100 / total
 		}
 
-		ratio := fmt.Sprintf("%d/%d", done, total)
+		// Align the ratio at the slash and the percent in its own column so
+		// every project's numbers line up vertically. The done part is padded
+		// to a fixed width (so the slash lands in a shared column) and the
+		// percent is right-aligned in a fixed column. The whole ratio is
+		// held in a fixed-width cell so the tail width (and therefore the
+		// name width) is constant across rows regardless of digit counts.
+		doneS := fmt.Sprintf("%d", done)
+		totalS := fmt.Sprintf("%d", total)
+		ratio := pad(padr(doneS, doneW)+"/"+totalS, ratioW)
 		pctS := fmt.Sprintf("%d%%", pct)
-		// ratio dim, percent in the project's hue (as before), and the pair
-		// placed around the horizontal centre of the line rather than glued to
-		// the name or pushed to the far edge.
 		tail := "  " + styles.DimS.Render(ratio) + "  " +
-			styles.S.Copy().Foreground(hue).Render(pctS)
-		col := inner / 2 // start the ratio/percent column at centre width
-		nameW := col - wlen(mark)
+			styles.S.Copy().Foreground(hue).Render(padr(pctS, pctW))
+		col := inner / 2 // start the ratio/percent columns at centre width
+		nameW := col - wlen(mark) - wlen(tail)
 		if nameW < 0 {
 			nameW = 0
 		}

@@ -157,7 +157,7 @@ func New(s store.Store) Model {
 		help:      help.New(),
 		width:     120,
 		height:    40,
-		landing:   landingState{counts: map[string][2]int{}},
+		landing:   landingState{},
 		create:    createState{errAt: -1},
 	}
 }

@@ -69,6 +69,13 @@ type Project struct {
 	ID          string
 	Name        string
 	Description string
+	// Progress reports how many leaf nodes are done out of total, as a
+	// fraction the landing renders (e.g. 0/0 or 17/23). Populated by the
+	// store; empty numbers render as 0/0.
+	Progress struct {
+		Done  int
+		Total int
+	}
 	// Archived hides the project from the landing picker. Deleted projects are
 	// not modelled yet — archiving is the reversible form of removal.
 	Archived bool
