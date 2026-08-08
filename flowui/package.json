@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --mode demo",
+    "dev:web": "vite",
     "build": "vite build",
     "build:demo": "vite build --mode demo",
     "preview": "vite preview",
@@ -13,7 +14,7 @@
     "test:watch": "vitest",
     "dev:server": "docker compose -f ../docker-compose.yml up --build",
     "dev:server:stop": "docker compose -f ../docker-compose.yml down",
-    "dev:all": "concurrently -n server,web -c auto \"npm run dev:server\" \"npm run dev\""
+    "dev:all": "concurrently -n server,web -c auto \"npm run dev:server\" \"npm run dev:web\""
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^4.0.0",
