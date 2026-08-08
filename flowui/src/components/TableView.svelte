@@ -20,6 +20,22 @@
   const DOT_CAP = 8;
   const narrow = $derived(app.panelMode === 'expanded' && !!app.selectedId && !mobile);
 
+  /**
+   * Expanding a task adds rows until the body overflows, and the vertical
+   * scrollbar that then appears steals width from the row grid but not from
+   * the header — so every flexible column shifts out from under its label.
+   * Both grids get the same reservation via --sbw so columns never move.
+   */
+  const sbw = typeof document !== 'undefined' ? measureScrollbar() : 0;
+  function measureScrollbar() {
+    const el = document.createElement('div');
+    el.style.cssText = 'width:50px;height:50px;overflow:scroll;visibility:hidden;position:absolute;top:-9999px';
+    document.body.appendChild(el);
+    const w = el.offsetWidth - el.clientWidth;
+    el.remove();
+    return w;
+  }
+
   const visibleTasks = (wpId: string) => tasksOf(app.nodes, wpId).filter(passesAll);
   const anyVisible = $derived(wps.some((w) => visibleTasks(w.id).length > 0));
   /** Nothing exists at all vs. everything is filtered away — different screens. */
@@ -203,30 +219,32 @@
     {/each}
   </div>
 {:else}
-  <div class="head">
-    <span></span><span>Node</span><span>Blocked by</span><span>Condition</span><span>Steps</span>
-    <span class="right">Status</span>
-  </div>
+  <div class="tbl" style="--sbw: {sbw}px">
+    <div class="head">
+      <span></span><span>Node</span><span>Blocked by</span><span>Condition</span><span>Steps</span>
+      <span class="right">Status</span>
+    </div>
 
-  <div class="scroll">
-    {@render wpGroup(liveWps)}
+    <div class="scroll">
+      {@render wpGroup(liveWps)}
 
-    {#if hidden > 0}
-      <button class="archived" onclick={() => (app.showArchived = !app.showArchived)}>
-        <span class="caret">{app.showArchived ? '▾' : '▸'}</span>
-        {hidden} completed work {hidden === 1 ? 'package' : 'packages'}
-        <span class="mono done">100%</span>
-      </button>
-      {#if app.showArchived}
-        {@render wpGroup(doneWps)}
+      {#if hidden > 0}
+        <button class="archived" onclick={() => (app.showArchived = !app.showArchived)}>
+          <span class="caret">{app.showArchived ? '▾' : '▸'}</span>
+          {hidden} completed work {hidden === 1 ? 'package' : 'packages'}
+          <span class="mono done">100%</span>
+        </button>
+        {#if app.showArchived}
+          {@render wpGroup(doneWps)}
+        {/if}
       {/if}
-    {/if}
 
-    <button
-      class="newwp"
-      onclick={() => (app.dialog = { kind: 'create', nodeType: 'WORK_PACKAGE', parentId: null, title: '' })}>
-      <span class="plus">+</span>New work package
-    </button>
+      <button
+        class="newwp"
+        onclick={() => (app.dialog = { kind: 'create', nodeType: 'WORK_PACKAGE', parentId: null, title: '' })}>
+        <span class="plus">+</span>New work package
+      </button>
+    </div>
   </div>
 {/if}
 
@@ -386,6 +404,7 @@
 {/snippet}
 
 <style>
+  .tbl,
   .head,
   .wp,
   .row,
@@ -401,6 +420,14 @@
     align-items: center;
     padding: 0 18px;
   }
+  .tbl {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    min-height: 0;
+    padding: 0;
+  }
   .head {
     height: 30px;
     flex: none;
@@ -409,6 +436,9 @@
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--fg3);
+    /* Keep the head the same width as the body even when the body's scrollbar
+       appears — otherwise the columns shift out from under their labels. */
+    padding-right: calc(18px + var(--sbw, 0px));
   }
   .right {
     text-align: right;
@@ -416,6 +446,9 @@
   .scroll {
     flex: 1;
     overflow: auto;
+    /* Reserve the gutter even with no overflow, so the head's matching
+       padding-right stays accurate and columns don't shift either way. */
+    scrollbar-gutter: stable;
   }
   .ellipsis {
     white-space: nowrap;
