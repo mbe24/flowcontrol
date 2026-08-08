@@ -10,6 +10,9 @@
   const index = $derived(buildIndex(app.nodes, app.deps));
   const node = $derived(app.nodes.find((n) => n.id === nodeId));
   const kids = $derived(node ? descendantsOf(app.nodes, nodeId) : []);
+  /** Descendant counts by kind, so the tally names them precisely. */
+  const taskKids = $derived(kids.filter((k) => k.type === 'TASK').length);
+  const stepKids = $derived(kids.filter((k) => k.type === 'STEP').length);
   const doomed = $derived(new Set([nodeId, ...kids.map((k) => k.id)]));
   const edges = $derived(
     app.deps.filter((d) => doomed.has(d.blockerId) || doomed.has(d.blockedId))
@@ -36,12 +39,27 @@
       <p><span class="strong">{node.title}</span>{kids.length ? ' and everything under it.' : '.'}</p>
 
       <div class="tally">
-        {#if kids.length}
+        {#if node.type === 'TASK' && stepKids}
           <div class="line">
-            <span class="mono n">{kids.length}</span>
-            <span class="what">{kids.length === 1 ? 'child node' : 'child nodes'}</span>
+            <span class="mono n">{stepKids}</span>
+            <span class="what">{stepKids === 1 ? 'step node' : 'step nodes'}</span>
             <span class="note warn">deleted</span>
           </div>
+        {:else if node.type === 'WORK_PACKAGE'}
+          {#if taskKids}
+            <div class="line">
+              <span class="mono n">{taskKids}</span>
+              <span class="what">{taskKids === 1 ? 'task node' : 'task nodes'}</span>
+              <span class="note warn">deleted</span>
+            </div>
+          {/if}
+          {#if stepKids}
+            <div class="line">
+              <span class="mono n">{stepKids}</span>
+              <span class="what">{stepKids === 1 ? 'step node' : 'step nodes'}</span>
+              <span class="note warn">deleted</span>
+            </div>
+          {/if}
         {/if}
         {#if edges.length}
           <div class="line">
