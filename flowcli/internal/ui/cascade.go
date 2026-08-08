@@ -42,7 +42,7 @@ type cascadeState struct {
 }
 
 const cascadeWidth = 46
-const cascadeVisible = 4
+const cascadeLines = 5
 
 // planCascade computes what a status change would do. Returns ok=false when
 // there is nothing to preview, in which case the caller applies immediately.
@@ -113,7 +113,12 @@ func (m Model) updateCascade(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "j", "down":
-		c.scroll = min(c.scroll+1, max(0, len(c.effects)-cascadeVisible))
+		// scroll by line; total mirrors the view's rendered lines
+		var total int
+		for _, e := range c.effects {
+			total += len(effectLines(cascadeWidth, e))
+		}
+		c.scroll = min(c.scroll+1, max(0, total-cascadeLines))
 	case "k", "up":
 		c.scroll = max(c.scroll-1, 0)
 
@@ -226,36 +231,34 @@ func (m Model) viewCascade(w int) string {
 		head += fmt.Sprintf(" · closes %d", closes)
 	}
 	page := ""
-	if len(c.effects) > cascadeVisible {
-		page = fmt.Sprintf("%d/%d", c.scroll/cascadeVisible+1,
-			(len(c.effects)+cascadeVisible-1)/cascadeVisible)
-	}
 	lines = append(lines, sectionRule(head, page, cascadeWidth))
 	lines = append(lines, "")
 
-	end := min(c.scroll+cascadeVisible, len(c.effects))
-	for _, e := range c.effects[c.scroll:end] {
-		trans := styles.Status(e.from).Render(string(e.from)) +
-			styles.DimS.Render(" → ") + styles.Status(e.to).Render(string(e.to))
-		if e.stuck {
-			trans = styles.DimS.Render("still blocked")
-		}
-		glyph := styles.Status(e.node.Status).Render("●")
-		if e.stuck {
-			glyph = styles.S.Copy().Foreground(styles.Deferred).Render("◇")
-		}
-		// title uses (almost) the full dialog width
-		title := padTrunc(e.node.ID+" "+e.node.Title, cascadeWidth-8)
-		lines = append(lines, styles.DimS.Render("└ ")+glyph+" "+styles.FgS.Render(title))
-		// cross-WP name below the task, then the status verdict below that
-		// (order: task, WP if cross-dep, status verdict)
-		if e.crossWP != "" {
-			lines = append(lines, "    "+styles.S.Copy().Foreground(styles.Hues[1]).Render("⟨"+e.crossWP+"⟩"))
-		}
-		lines = append(lines, "    "+trans)
+	// Render every effect into its lines, then window by line with a fixed
+	// height so the dialog stays constant and scrolls with j/k — exactly
+	// like the delete confirm panel's unblocks section.
+	var all []string
+	for _, e := range c.effects {
+		all = append(all, effectLines(cascadeWidth, e)...)
 	}
-	if len(c.effects) > end {
-		lines = append(lines, "  "+styles.DimS.Render(fmt.Sprintf("▼ %d more", len(c.effects)-end)))
+	total := len(all)
+	if total <= cascadeLines {
+		c.scroll = 0
+	}
+	c.scroll = min(c.scroll, max(0, total-cascadeLines))
+	if total > cascadeLines {
+		page = fmt.Sprintf("%d/%d", c.scroll/cascadeLines+1,
+			(total+cascadeLines-1)/cascadeLines)
+	}
+	lines = append(lines, "")
+	// Always render exactly cascadeLines lines (blank-padded) so the dialog
+	// height stays constant while scrolling and regardless of effect count.
+	end := min(c.scroll+cascadeLines, total)
+	for _, l := range all[c.scroll:end] {
+		lines = append(lines, l)
+	}
+	for range cascadeLines - (end - c.scroll) {
+		lines = append(lines, "")
 	}
 	lines = append(lines, "")
 

@@ -166,6 +166,9 @@ func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.setStatus(id, prev)
 		}
 		return m, nil
+
+	case "backspace", "delete":
+		return m.tryDelete()
 	}
 
 	switch m.screen {
@@ -332,6 +335,26 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateCreate(msg)
 	case OverlayCascade:
 		return m.updateCascade(msg)
+	case OverlayDelete:
+		switch msg.String() {
+		case "esc", "n", "q":
+			m.overlay, m.deleteInfo, m.deleteScroll = OverlayNone, nil, 0
+		case "y", "enter":
+			id := m.deleteInfo.id
+			m.overlay, m.deleteInfo, m.deleteScroll = OverlayNone, nil, 0
+			m.flash = "deleted " + id + " · u to undo"
+			return m, m.doDelete(id)
+		case "j", "down":
+			// scroll by line; the clamp mirrors the view's own total
+			var total int
+			for _, e := range m.deleteInfo.unblocked {
+				total += len(effectLines(46, e))
+			}
+			m.deleteScroll = min(m.deleteScroll+1, max(0, total-deleteLines))
+		case "k", "up":
+			m.deleteScroll = max(m.deleteScroll-1, 0)
+		}
+		return m, nil
 	case OverlayHelp:
 		switch msg.String() {
 		case "esc", "?", "q":
@@ -510,6 +533,123 @@ func (m *Model) search(q string) []store.Node {
 func (m Model) setStatus(id string, s store.Status) tea.Cmd {
 	return func() tea.Msg {
 		_ = m.store.SetStatus(m.ctx, id, s)
+		return m.refresh()
+	}
+}
+
+// tryDelete handles backspace/delete. A leaf with no edges deletes straight
+// away (status line offers u); anything with collateral opens the confirm
+// dialog so the cascade is named before it happens.
+func (m Model) tryDelete() (tea.Model, tea.Cmd) {
+	n, ok := m.current()
+	if !ok {
+		return m, nil
+	}
+	// Deleting a step is done from its owning task's view; the owner is the
+	// row the cursor is really on for steps, but deletion targets the node
+	// itself (a step's children are meaningless). Use the raw node.
+	target := n
+	col := m.deleteCollateral(target.ID)
+	if col.taskCount == 0 && col.stepCount == 0 && col.edgeCount == 0 {
+		// leaf with no edges: just do it, undo is one u away
+		m.flash = "deleted " + target.ID + " · u to undo"
+		return m, m.doDelete(target.ID)
+	}
+	m.deleteInfo = col
+	m.overlay = OverlayDelete
+	return m, nil
+}
+
+// deleteCollateral computes what deleting id would remove/keep/unblock.
+func (m *Model) deleteCollateral(id string) *deleteCollateral {
+	sub := m.subtree(id)
+	col := &deleteCollateral{id: id, title: m.byID[id].Title}
+	// the work package that owns the node being deleted; unblocked dependents
+	// from the same package get no WP line in the unblocks section (only
+	// cross-package ones do).
+	deadWP := m.byID[id].ParentID
+
+	// descendants (everyone in the subtree except the root), split by kind
+	for _, n := range m.nodes {
+		if n.ID == id {
+			continue
+		}
+		if !sub[n.ID] {
+			continue
+		}
+		switch n.Type {
+		case store.Task:
+			col.taskCount++
+		case store.Step:
+			col.stepCount++
+		}
+	}
+
+	// edges where either endpoint is in the subtree
+	for _, d := range m.deps {
+		if sub[d.BlockerID] || sub[d.BlockedID] {
+			col.edgeCount++
+		}
+	}
+
+	// What unblocks: a dependent OUTSIDE the subtree whose blockers all vanish
+	// with the deletion — i.e. every blocker of the dependent is inside the
+	// subtree. Rendered like the cascade preview.
+	for _, d := range m.deps {
+		if !sub[d.BlockedID] && sub[d.BlockerID] {
+			dep, ok := m.byID[d.BlockedID]
+			if !ok {
+				continue
+			}
+			// A dependent is still stuck if it has a blocker outside the subtree.
+			stuck := false
+			for _, b := range m.blockers[dep.ID] {
+				if !sub[b] {
+					if other, ok := m.byID[b]; ok && other.Status != store.Done {
+						stuck = true
+					}
+				}
+			}
+			e := effect{node: dep, from: dep.Status, to: store.Ready}
+			if stuck {
+				e.stuck = true
+				e.to = dep.Status
+			}
+			if p, ok := m.byID[dep.ParentID]; ok && dep.ParentID != deadWP {
+				e.crossWP = p.Title
+			}
+			col.unblocked = append(col.unblocked, e)
+		}
+	}
+
+	// activity entries for the subtree are kept (they're history)
+	for _, a := range m.activity {
+		if sub[a.NodeID] {
+			col.actCount++
+		}
+	}
+	return col
+}
+
+// subtree returns the map of ids reachable from root (root + descendants).
+func (m *Model) subtree(root string) map[string]bool {
+	out := map[string]bool{root: true}
+	changed := true
+	for changed {
+		changed = false
+		for _, n := range m.nodes {
+			if out[n.ParentID] && !out[n.ID] {
+				out[n.ID] = true
+				changed = true
+			}
+		}
+	}
+	return out
+}
+
+func (m Model) doDelete(id string) tea.Cmd {
+	return func() tea.Msg {
+		_ = m.store.DeleteNode(m.ctx, id)
 		return m.refresh()
 	}
 }

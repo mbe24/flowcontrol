@@ -169,18 +169,42 @@ func (m Model) laneCard(t store.Node, laneW int, sel bool) []cardLine {
 	if p, ok := m.byID[t.ParentID]; ok {
 		pkg = p.Title
 	}
-	hue := styles.Hues[m.hueOf(t.ParentID)%len(styles.Hues)]
-	foot := " " + pkg
-	footR := " " + lipgloss.NewStyle().Foreground(hue).Render(pkg)
-	// the ←blocker annotation is the first thing dropped when narrow
+	// Keep the footnote inside the lane: reserve the annotation's width up
+	// front and clip the WP name to what's left, so the coloured string fits
+	// and never falls through to cell()'s colour-dropping plain path.
+	ann := ""
 	if laneW >= 30 && len(m.blockers[t.ID]) > 0 {
-		ann := " ←" + m.blockers[t.ID][0]
-		if wlen(foot)+wlen(ann) <= laneW {
-			foot += ann
-			footR += styles.DimS.Render(ann)
+		cand := " ←" + m.blockers[t.ID][0]
+		if wlen(" "+pkg)+wlen(cand) <= laneW {
+			ann = cand
 		}
 	}
+	avail := laneW - 1 - wlen(ann)
+	if avail < 1 {
+		avail = 1
+	}
+	clipped := clipRunes(pkg, avail)
+	hue := styles.Hues[wpHue(t.ParentID)]
+	foot := " " + clipped
+	footR := " " + lipgloss.NewStyle().Foreground(hue).Render(clipped)
+	if ann != "" {
+		foot += ann
+		footR += styles.DimS.Render(ann)
+	}
 	return append(col, cardLine{foot, footR})
+}
+
+// clipRunes cuts s to at most w display cells, trimming a trailing partial
+// glyph so no half-width ever reaches the terminal.
+func clipRunes(s string, w int) string {
+	out := ""
+	for _, c := range []rune(stripANSI(s)) {
+		if wlen(out+string(c)) > w {
+			break
+		}
+		out += string(c)
+	}
+	return out
 }
 
 func (m Model) viewLanes(w, h int) string {

@@ -30,6 +30,12 @@ const (
 	// lines up across projects, percent right-aligned in its own column.
 	doneW = 2 // "17" — pads to a shared slash column
 	pctW  = 4 // "100%"
+
+	// countW is the fixed width of the number in the delete dialog's
+	// collateral lines ("6 task nodes"…). Left-aligned numbers pad to this
+	// width so the label after them starts at the same column regardless of
+	// how many digits the count has.
+	countW = 3
 )
 
 func pad(s string, w int) string {
@@ -228,7 +234,10 @@ func (m Model) viewTree(w, h int) string {
 			// step-percent under the task step-counter. The state is separated
 			// from the bar by a wider gap so it doesn't crowd the ratio bars.
 			right := "  " + state + "      " + bar + " " + padr(fmt.Sprintf("%d%%", pct), ratioW)
-			line := treeRow(prefix, rw.node.Title, styles.BrightS.Render(rw.node.Title), right, inner)
+			nameS := lipgloss.NewStyle().
+				Foreground(styles.Hues[wpHue(rw.node.ID)]).
+				Bold(true)
+			line := treeRow(prefix, rw.node.Title, nameS.Render(rw.node.Title), right, inner)
 			if sel {
 				line = selectedLine(line)
 			}

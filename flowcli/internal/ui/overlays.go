@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	lv2 "charm.land/lipgloss/v2"
@@ -9,6 +10,11 @@ import (
 	"flowcli/internal/store"
 	"flowcli/internal/styles"
 )
+
+// deleteLines caps how many lines of the unblocked section the delete confirm
+// shows at once (about one dependent); the rest is reached by scrolling with
+// j/k (like the lanes).
+const deleteLines = 5
 
 // box draws a small centred overlay panel below the main screen.
 func box(title, titleColour string, lines []string, w int) string {
@@ -78,6 +84,102 @@ func (m Model) viewOverlay(w int) string {
 		return m.viewCreate(w)
 	case OverlayCascade:
 		return m.viewCascade(w)
+	case OverlayDelete:
+		c := m.deleteInfo
+		if c == nil {
+			return ""
+		}
+		// Fixed content width (like the cascade dialog's cascadeWidth) so the
+		// dialog is wide and the right-aligned tag column sits near the right
+		// wall instead of in the screen center.
+		const inner = 46
+
+		var body []string
+		body = append(body, "",
+			"  "+styles.BrightS.Render(c.id+"  "+c.title),
+			"")
+		// Which lines describe the collateral depends on the kind of node:
+		// a work package's descendants are tasks + steps; a task's are steps.
+		// Numbers are left-aligned in a fixed-width column so the label after
+		// them starts at the same column even as the digit count changes.
+		pn := func(n int) string { return pad(fmt.Sprintf("%d", n), countW) }
+		var descLines []string
+		if m.byID[c.id].Type == store.WorkPackage {
+			descLines = []string{
+				pn(c.taskCount) + " task nodes",
+				pn(c.stepCount) + " step nodes",
+			}
+		} else {
+			descLines = []string{
+				pn(c.stepCount) + " step nodes",
+			}
+		}
+		// Right-aligned tag per line, mirroring the status dialog: every tag
+		// ends flush against the right wall of the fixed-width dialog.
+		type tagLine struct{ left, tag string }
+		var tags []tagLine
+		for _, l := range descLines {
+			tags = append(tags, tagLine{left: l, tag: "deleted"})
+		}
+		tags = append(tags,
+			tagLine{left: pn(c.edgeCount) + " dependency edges", tag: "removed"},
+			tagLine{left: pn(c.actCount) + " activity entries", tag: "kept"},
+		)
+		// All tags share one column: each tag is right-aligned inside a
+		// fixed-width field as wide as the longest tag ("removed"), so shorter
+		// tags like "kept" still end at the same right edge.
+		tagW := 0
+		for _, tl := range tags {
+			if v := wlen(tl.tag); v > tagW {
+				tagW = v
+			}
+		}
+		for _, tl := range tags {
+			left := "  " + styles.FgS.Render(tl.left)
+			tag := styles.S.Copy().Foreground(styles.Blocked).Render(tl.tag)
+			if tl.tag != "deleted" {
+				tag = styles.DimS.Render(tl.tag)
+			}
+			pad := inner - 2 - wlen(stripANSI(left)) - tagW
+			if pad < 1 {
+				pad = 1
+			}
+			line := left + strings.Repeat(" ", pad) + strings.Repeat(" ", tagW-wlen(tl.tag)) + tag
+			body = append(body, line)
+		}
+		if len(c.unblocked) > 0 {
+			head := "unblocks " + strconv.Itoa(len(c.unblocked))
+			// Pre-render every unblocked dependent into its lines (ID line +
+			// wrapped title + WP + verdict), then window them by line so the
+			// section keeps a fixed height and scrolls with j/k.
+			var all []string
+			for _, e := range c.unblocked {
+				all = append(all, effectLines(inner, e)...)
+			}
+			total := len(all)
+			if total <= deleteLines {
+				m.deleteScroll = 0
+			}
+			m.deleteScroll = min(m.deleteScroll, max(0, total-deleteLines))
+			page := ""
+			if total > deleteLines {
+				page = fmt.Sprintf("%d/%d", m.deleteScroll/deleteLines+1,
+					(total+deleteLines-1)/deleteLines)
+			}
+			body = append(body, "", sectionRule(head, page, inner), "")
+			// Always render exactly deleteLines lines (blank-padded) so the
+			// dialog height stays constant while scrolling and regardless of
+			// how many dependents unblock.
+			end := min(m.deleteScroll+deleteLines, total)
+			for _, l := range all[m.deleteScroll:end] {
+				body = append(body, l)
+			}
+			for range deleteLines - (end - m.deleteScroll) {
+				body = append(body, "")
+			}
+		}
+		keys := styles.DimS.Render("[esc] cancel    ") + styles.AccentS.Render("[y] delete")
+		return boxWithKeys("delete "+c.id+"?", styles.Accent, body, keys, inner, w)
 	case OverlayConfirm:
 		node, ok := m.byID[m.confirmID]
 		if !ok {
@@ -208,4 +310,48 @@ func (m Model) viewOverlay(w int) string {
 		return box("find", "", lines, w)
 	}
 	return ""
+}
+
+// unblockLines renders one unblocked dependent as a wrapped group: the first
+// line carries the gutter + status glyph + node ID; the title follows on its
+// own line(s), indented to align with the ⟨WP⟩ and status-verdict lines below
+// (the node ID column), so a long title wraps instead of being cut off at the
+// dialog edge.
+func unblockLines(inner int, e effect) []string {
+	glyph := styles.Status(e.node.Status).Render("●")
+	if e.stuck {
+		glyph = styles.S.Copy().Foreground(styles.Deferred).Render("◇")
+	}
+	first := styles.DimS.Render("└ ") + glyph + " " + styles.FgS.Render(e.node.ID)
+	title := e.node.Title
+	avail := inner - 4
+	if wlen(title) <= avail {
+		return []string{first, "    " + styles.FgS.Render(title)}
+	}
+	wrap := wrapPlain(title, avail)
+	lines := []string{first}
+	indent := strings.Repeat(" ", 4) // aligns under the node ID, like the WP/status lines
+	for _, wl := range wrap {
+		lines = append(lines, indent+styles.FgS.Render(wl))
+	}
+	return lines
+}
+
+// effectLines renders one effect (an unblocked or cascaded dependent) the way
+// the delete confirm and cascade panels both show it: an ID line with the
+// wrapped title on its own indented line(s), a cross-package WP line when the
+// dependent lives in a different package, then the status verdict. Both panels
+// share this so their unblocks sections stay visually identical.
+func effectLines(inner int, e effect) []string {
+	trans := styles.Status(e.from).Render(string(e.from)) +
+		styles.DimS.Render(" → ") + styles.Status(e.to).Render(string(e.to))
+	if e.stuck {
+		trans = styles.DimS.Render("still blocked")
+	}
+	lines := unblockLines(inner, e)
+	if e.crossWP != "" {
+		hue := styles.Hues[wpHue(e.node.ParentID)]
+		lines = append(lines, "    "+styles.S.Copy().Foreground(hue).Render(e.crossWP))
+	}
+	return append(lines, "    "+trans)
 }

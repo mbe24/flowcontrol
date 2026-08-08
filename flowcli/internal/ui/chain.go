@@ -255,7 +255,7 @@ func (m Model) viewChain(w, h int) string {
 		}
 		line := styles.DimS.Render(gutter) + dot + " " + idS.Render(r.node.ID) + "  " + titleS.Render(r.node.Title)
 		if r.crossWP != "" {
-			line += "  " + lipgloss.NewStyle().Foreground(styles.Hues[1]).Render(r.crossWP)
+			line += "  " + lipgloss.NewStyle().Foreground(styles.Hues[wpHue(r.node.ParentID)]).Render(r.crossWP)
 		}
 		if sel {
 			// Pad to the full row width first, then let selectedLine strip the

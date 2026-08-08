@@ -20,13 +20,20 @@ var (
 	SelBg    = lipgloss.Color("#808080")
 )
 
-// Package hues, assigned in work-package order.
+// Package hues, assigned in work-package order. Ten distinct, terminal-safe
+// colours are provided so a project with many work packages stays easy to
+// tell apart; wpHue wraps the palette when there are more packages than hues.
 var Hues = []lipgloss.Color{
-	lipgloss.Color("#5ad1e6"),
-	lipgloss.Color("#c58af9"),
-	lipgloss.Color("#8fd15a"),
-	lipgloss.Color("#e86a9b"),
-	lipgloss.Color("#f0a35e"),
+	lipgloss.Color("#5ad1e6"), // teal
+	lipgloss.Color("#c58af9"), // purple
+	lipgloss.Color("#8fd15a"), // green
+	lipgloss.Color("#e86a9b"), // pink
+	lipgloss.Color("#f0a35e"), // orange
+	lipgloss.Color("#7cd6ff"), // sky
+	lipgloss.Color("#ffd85e"), // yellow
+	lipgloss.Color("#9aa7f0"), // periwinkle
+	lipgloss.Color("#5ee0c4"), // mint
+	lipgloss.Color("#ff9ec4"), // rose
 }
 
 var (

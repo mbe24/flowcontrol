@@ -2,13 +2,15 @@ package ui
 
 import (
 	"context"
+	"hash/fnv"
 	"sort"
 
 	"github.com/charmbracelet/bubbles/help"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 
 	"flowcli/internal/store"
+	"flowcli/internal/styles"
 )
 
 type Screen int
@@ -34,6 +36,7 @@ const (
 	OverlayHelp
 	OverlayCreate
 	OverlayCascade
+	OverlayDelete
 )
 
 // Lane layout thresholds, derived from the drawn card widths:
@@ -69,6 +72,21 @@ type row struct {
 	depth    int
 	isWP     bool
 	expanded bool
+}
+
+// deleteCollateral describes what deleting a node will remove, keep or
+// unblock, so the confirm dialog can name it precisely (designer rule: the
+// confirm earns the cascade by naming the collateral).
+type deleteCollateral struct {
+	id        string
+	title     string
+	taskCount int // descendant task nodes that will be deleted
+	stepCount int // descendant step nodes that will be deleted
+	edgeCount int // dependency edges that will be removed
+	actCount  int // activity entries that are kept
+	// unblocked lists the dependents that become ready once the subtree is
+	// gone, rendered exactly like the cascade preview's unblocks view.
+	unblocked []effect
 }
 
 type Model struct {
@@ -124,23 +142,27 @@ type Model struct {
 	activityScrl int
 
 	// overlays
-	input       textinput.Model
-	finderHits  []store.Node
-	finderIdx   int
+	input        textinput.Model
+	finderHits   []store.Node
+	finderIdx    int
 	finderScroll int
-	fromFinder  bool
-	statusIdx   int
-	projectIdx  int
-	confirmID   string
-	lastStatus  *struct {
+	fromFinder   bool
+	statusIdx    int
+	projectIdx   int
+	confirmID    string
+	// deleteInfo holds the collateral for the deletion being confirmed, so
+	// the confirm dialog can name what will be deleted / kept / unblocked.
+	deleteInfo   *deleteCollateral
+	deleteScroll int
+	lastStatus   *struct {
 		id   string
 		prev store.Status
 	}
 
 	// create / landing (Phase C designer components); cascade (Phase D)
-	create   createState
-	landing  landingState
-	cascade  cascadeState
+	create  createState
+	landing landingState
+	cascade cascadeState
 }
 
 func New(s store.Store) Model {
@@ -323,13 +345,14 @@ func (m *Model) counts(wpID string) (d, r, b, df, total int) {
 	return
 }
 
-func (m *Model) hueOf(wpID string) int {
-	for i, wp := range m.workPackages() {
-		if wp.ID == wpID {
-			return i
-		}
-	}
-	return 0
+// wpHue returns a deterministic, stable colour index for a work package,
+// derived from a hash of its ID rather than from ordering. This lets the same
+// WP always render with the same hue everywhere (lanes footnote, delete and
+// cascade dialogs, chain view) regardless of how the package list is sorted.
+func wpHue(wpID string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(wpID))
+	return int(h.Sum32() % uint32(len(styles.Hues)))
 }
 
 func max(a, b int) int {
