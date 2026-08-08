@@ -330,6 +330,8 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.overlay {
 	case OverlayCreate:
 		return m.updateCreate(msg)
+	case OverlayCascade:
+		return m.updateCascade(msg)
 	case OverlayHelp:
 		switch msg.String() {
 		case "esc", "?", "q":
@@ -350,6 +352,27 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case OverlayStatus:
+		// chooseStatus is the shared path for Enter and the r/b/x/d shortcuts:
+		// plan the cascade first (a no-effect change applies immediately), else
+		// open the cascade preview.
+		chooseStatus := func(to store.Status) (tea.Model, tea.Cmd) {
+			if n, ok := m.current(); ok {
+				target := m.ownerTask(n)
+				cc, plan := m.planCascade(target, to)
+				if !plan {
+					m.overlay = OverlayNone
+					m.lastStatus = &struct {
+						id   string
+						prev store.Status
+					}{target.ID, target.Status}
+					m.flash = target.ID + " → " + string(to) + " · nothing was waiting"
+					return m, m.setStatus(target.ID, to)
+				}
+				m.overlay = OverlayCascade
+				m.cascade = cc
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "esc":
 			m.overlay = OverlayNone
@@ -358,17 +381,16 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "k", "up":
 			m.statusIdx = max(m.statusIdx-1, 0)
 		case "enter":
-			m.overlay = OverlayNone
-			if n, ok := m.current(); ok {
-				target := m.ownerTask(n)
-				m.lastStatus = &struct {
-					id   string
-					prev store.Status
-				}{target.ID, target.Status}
-				return m, m.setStatus(target.ID, store.AllStatuses[m.statusIdx])
-			}
+			return chooseStatus(store.AllStatuses[m.statusIdx])
+		case "r":
+			return chooseStatus(store.Ready)
+		case "b":
+			return chooseStatus(store.Blocked)
+		case "x":
+			return chooseStatus(store.Deferred)
+		case "d":
+			return chooseStatus(store.Done)
 		}
-		return m, nil
 
 	case OverlayProjects:
 		switch msg.String() {

@@ -138,8 +138,9 @@ type Model struct {
 	}
 
 	// create / landing (Phase C designer components); cascade (Phase D)
-	create  createState
-	landing landingState
+	create   createState
+	landing  landingState
+	cascade  cascadeState
 }
 
 func New(s store.Store) Model {

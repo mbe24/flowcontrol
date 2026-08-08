@@ -76,6 +76,8 @@ func (m Model) viewOverlay(w int) string {
 	switch m.overlay {
 	case OverlayCreate:
 		return m.viewCreate(w)
+	case OverlayCascade:
+		return m.viewCascade(w)
 	case OverlayConfirm:
 		node, ok := m.byID[m.confirmID]
 		if !ok {
@@ -98,15 +100,44 @@ func (m Model) viewOverlay(w int) string {
 
 	case OverlayStatus:
 		var lines []string
-		lines = append(lines, "")
+		// current status of the target node, for the grey "(current)" marker
+		current := ""
+		if n, ok := m.current(); ok {
+			current = string(m.ownerTask(n).Status)
+		}
+		// shortcut letter per status, in the status colour
+		keyFor := map[store.Status]string{
+			store.Ready:    "r",
+			store.Blocked:  "b",
+			store.Deferred: "x",
+			store.Done:     "d",
+		}
+		// The footer line is the widest line and therefore sets the dialog
+		// width. Pad every status row so its shortcut sits flush against the
+		// right wall (with a small margin) without widening the dialog.
+		footer := styles.DimS.Render("j/k move   r/b/x/d set   ret set   esc cancel")
+		inner := wlen(stripANSI(footer))
+		if inner > w-6 {
+			inner = w - 6
+		}
 		for i, s := range store.AllStatuses {
 			marker := "  "
 			if i == m.statusIdx {
 				marker = styles.AccentS.Render("▸ ")
 			}
-			lines = append(lines, marker+styles.Status(s).Render(string(s)))
+			name := string(s)
+			if name == current {
+				name += "  " + styles.DimS.Render("(current)")
+			}
+			left := marker + styles.Status(s).Render(name)
+			key := styles.Status(s).Render(keyFor[s])
+			pad := inner - 3 - wlen(stripANSI(left)) - wlen(stripANSI(key))
+			if pad < 1 {
+				pad = 1
+			}
+			lines = append(lines, left+strings.Repeat(" ", pad)+key)
 		}
-		lines = append(lines, "", styles.DimS.Render("j/k move   ret set   esc cancel"), "")
+		lines = append(lines, "", footer, "")
 		return box("set status", "", lines, w)
 
 	case OverlayProjects:
