@@ -220,6 +220,7 @@
   }
   .card:hover {
     border-color: var(--fg3);
+    border-left-color: var(--hue);
   }
   .card.selected {
     border-color: var(--accent);

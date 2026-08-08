@@ -430,6 +430,7 @@
   }
   .box:hover {
     border-color: var(--fg3);
+    border-left-color: var(--hue);
   }
   .boxhead {
     display: flex;
