@@ -10,11 +10,16 @@
   }
   let { nodeType, parentId, initialTitle }: Props = $props();
 
+  // These deliberately seed state from the props once (a dialog opens fresh).
+  // svelte-ignore state_referenced_locally
   let kind = $state<NodeType>(nodeType);
+  // svelte-ignore state_referenced_locally
   let parent = $state<string | null>(parentId);
+  // svelte-ignore state_referenced_locally
   let title = $state(initialTitle);
   let description = $state('');
   let condition = $state('');
+  // svelte-ignore state_referenced_locally
   let another = $state(initialTitle.length > 0);
   let busy = $state(false);
   let titleEl: HTMLInputElement | undefined = $state();
@@ -93,7 +98,7 @@
   ];
 </script>
 
-<div class="scrim" onclick={() => (app.dialog = null)} role="presentation">
+<div class="scrim" onclick={() => (app.dialog = null)} onkeydown={(e) => e.key === 'Escape' && (app.dialog = null)} role="presentation">
   <div class="dialog" onclick={(e) => e.stopPropagation()} onkeydown={onKey} role="dialog" tabindex="-1">
     <div class="head">
       <span class="h">New node</span>
@@ -338,8 +343,7 @@
     font-size: 12px;
   }
   input,
-  textarea,
-  select {
+  textarea {
     width: 100%;
     box-sizing: border-box;
     padding: 10px 11px;
@@ -353,8 +357,7 @@
     resize: vertical;
   }
   input:focus,
-  textarea:focus,
-  select:focus {
+  textarea:focus {
     border-color: var(--accent);
   }
   input::placeholder,
@@ -422,8 +425,7 @@
       flex: 1 1 30%;
     }
     input,
-    textarea,
-    select {
+    textarea {
       min-height: 44px;
       font-size: 16px; /* iOS zooms below 16 */
     }

@@ -280,6 +280,12 @@
                 e.stopPropagation();
                 toggleTask(t.id);
               }}
+              onkeydown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.stopPropagation();
+                  toggleTask(t.id);
+                }
+              }}
               role="button"
               tabindex="-1">{steps.length ? (app.expandedTask[t.id] ? '▾' : '▸') : ''}</span>
             <div class="node">

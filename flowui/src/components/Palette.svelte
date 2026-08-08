@@ -109,7 +109,7 @@
 </script>
 
 <div class="scrim" onclick={() => (app.paletteOpen = false)} role="presentation">
-  <div class="palette" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
+  <div class="palette" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.key === 'Escape' && (app.paletteOpen = false)} role="dialog" tabindex="-1">
     <div class="input">
       <span class="mono caret">›</span>
       <!-- svelte-ignore a11y_autofocus -->

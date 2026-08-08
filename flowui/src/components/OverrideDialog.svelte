@@ -6,7 +6,7 @@
 
 {#if node}
   <div class="scrim" role="presentation" onclick={() => (app.confirmOverride = null)}>
-    <div class="dialog" role="alertdialog" tabindex="-1" onclick={(e) => e.stopPropagation()}>
+    <div class="dialog" role="alertdialog" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.key === 'Escape' && (app.confirmOverride = null)}>
       <div class="head">
         <span class="mark">✕</span>
         <span class="h">The agent reported a failure</span>

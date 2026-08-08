@@ -28,7 +28,7 @@
 
 {#if node}
   <div class="scrim" onclick={() => (app.dialog = null)} role="presentation">
-    <div class="dialog" onclick={(e) => e.stopPropagation()} role="alertdialog" tabindex="-1">
+    <div class="dialog" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.key === 'Escape' && (app.dialog = null)} role="alertdialog" tabindex="-1">
       <div class="head">
         <span class="mark">!</span>
         <span class="h">Delete {node.id}?</span>

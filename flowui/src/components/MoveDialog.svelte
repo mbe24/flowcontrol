@@ -64,7 +64,7 @@
 
 {#if node}
   <div class="scrim" onclick={() => (app.dialog = null)} role="presentation">
-    <div class="dialog" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
+    <div class="dialog" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.key === 'Escape' && (app.dialog = null)} role="dialog" tabindex="-1">
       <span class="h">{heading}</span>
 
       <div class="subject">

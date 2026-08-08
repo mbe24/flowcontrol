@@ -806,10 +806,6 @@
     font-size: 10px;
     cursor: pointer;
   }
-  .glyph {
-    font-size: 10px;
-    flex: none;
-  }
   .stitle {
     flex: 1;
     min-width: 0;
@@ -824,14 +820,6 @@
     cursor: pointer;
     padding: 2px 4px;
   }
-  .snote {
-    margin: 0;
-    padding: 0 10px 8px 27px;
-    font-size: 10.5px;
-    line-height: 1.5;
-    color: var(--fg2);
-    text-wrap: pretty;
-  }
   /* The expanded editing area: step body (note) then its condition. */
   .snbody {
     padding: 2px 10px 8px 21px;
@@ -843,38 +831,6 @@
     display: block;
     font-size: 9.5px;
     color: var(--fg3);
-  }
-  .dep {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 9px;
-    border-radius: 6px;
-    background: var(--panel2);
-    border: 1px solid var(--border2);
-  }
-  .dir {
-    font-size: 9px;
-    color: var(--fg3);
-    width: 54px;
-    flex: none;
-  }
-  .ddot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    flex: none;
-  }
-  .did {
-    font-size: 9.5px;
-    color: var(--fg3);
-  }
-  .dtitle {
-    flex: 1;
-    font-size: 10.5px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   .act {
     display: flex;

@@ -239,9 +239,6 @@
     width: auto;
     height: 5px;
   }
-  .spacer {
-    flex: 1;
-  }
   .icon {
     position: relative;
     min-width: 40px;

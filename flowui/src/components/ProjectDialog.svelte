@@ -9,7 +9,10 @@
 
   const existing = $derived(projectId ? app.projects.find((p) => p.id === projectId) : undefined);
 
+  // Seed the form once from the project; `existing` is a prop/derived snapshot.
+  // svelte-ignore state_referenced_locally
   let name = $state(existing?.name ?? '');
+  // svelte-ignore state_referenced_locally
   let description = $state(existing?.description ?? '');
   /** A brand-new project has no work package, so the table has nowhere to
       show a ghost row. Seeding one keeps the inline path working. */
