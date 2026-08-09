@@ -94,12 +94,13 @@ func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// inline edit of title / condition lives in updateDetail
 			break
 		}
-		// full create form, kind unlocked
-		parent := ""
-		if n, ok := m.current(); ok && n.Type == store.WorkPackage {
-			parent = n.ID
+		if m.screen == ScreenChain {
+			// creating nodes is not offered on the chain view
+			break
 		}
-		m.openCreate(createPackage, parent, "", false)
+		// full create form, kind unlocked. Packages live at project level,
+		// so there is no parent to inherit from a cursor row.
+		m.openCreate(createPackage, "", "", false)
 		return m, nil
 
 	case "?":

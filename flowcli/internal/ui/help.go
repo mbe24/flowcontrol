@@ -117,6 +117,7 @@ func lanesKeys() screenKeys {
 func chainKeys() screenKeys {
 	km := treeKeys()
 	km.Up = kb("j / k", []string{"j", "down", "k", "up"}, "move up")
+	km.Create = key.Binding{} // no node creation from the chain view
 	km.Left = key.Binding{}
 	km.Right = key.Binding{}
 	km.Focus = kb("f", []string{"f"}, "focus task")
