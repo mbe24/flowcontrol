@@ -35,11 +35,17 @@
       .filter((n) => n.id !== node.id && n.type !== 'STEP')
       .filter((n) => n.title.toLowerCase().includes(q) || n.id.toLowerCase().includes(q))
       .filter((n) => !blockers.includes(n.id))
-      .slice(0, 6)
+      .slice(0, 12)
       .map((n) => ({ node: n, cycles: wouldCycle(index, n.id, node.id) }));
   });
 
-  const wpOf = (n: FlowNode) => (n.parentId ? index.byId.get(n.parentId)?.title ?? '' : '');
+  /** Reserve the id column to the widest visible id so titles share one x,
+     no matter how long the task/package ids are. */
+  const idW = $derived.by(() => {
+    let m = 0;
+    for (const n of app.nodes) m = Math.max(m, n.id.length);
+    return Math.min(m + 1, 14) + 'ch';
+  });
 
   async function add(id: string) {
     query = '';
@@ -91,17 +97,25 @@
   </div>
 
   {#if open && candidates.length}
-    <div class="results">
+    <div class="results" style="--idw: {idW}">
       {#each candidates as c (c.node.id)}
-        <button class="hit" class:dead={c.cycles} disabled={c.cycles} onclick={() => add(c.node.id)}>
+        {@const wp = c.node.parentId ? index.byId.get(c.node.parentId) : undefined}
+        <button class="hit" class:dead={c.cycles} disabled={c.cycles} onmousedown={() => add(c.node.id)}>
           <span class="ddot" style:background={STATUS_VAR[c.node.status]}></span>
-          <span class="mono did">{c.node.id}</span>
-          <span class="dtitle">{c.node.title}</span>
-          {#if c.cycles}
-            <span class="cyc">would cycle</span>
-          {:else if wpOf(c.node)}
-            <span class="wp">{wpOf(c.node)}</span>
-          {/if}
+          <span class="idcol">
+            <span class="mono did">{c.node.id}</span>
+            {#if !c.cycles && wp}
+              <span class="mono did sub">{wp.id}</span>
+            {/if}
+          </span>
+          <span class="namecol">
+            <span class="dtitle">{c.node.title}</span>
+            {#if c.cycles}
+              <span class="cyc">would cycle</span>
+            {:else if wp}
+              <span class="dsubtitle">{wp.title}</span>
+            {/if}
+          </span>
         </button>
       {/each}
     </div>
@@ -193,7 +207,8 @@
     border-radius: 7px;
     background: var(--panel2);
     border: 1px solid var(--border);
-    overflow: hidden;
+    overflow-y: auto;
+    max-height: 280px;
   }
   .hit {
     display: flex;
@@ -215,15 +230,50 @@
     opacity: 0.4;
     cursor: default;
   }
-  .wp {
-    font-size: 9.5px;
-    color: var(--hue-booking);
+  /* Two stacked columns: the id column is reserved to the widest visible
+     id/package, so every title starts on the same x regardless of id length.
+     The owning package sits on the second line instead of eating the row's
+     right edge, where there's no room in the panel/sheet. */
+  .idcol,
+  .namecol {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .idcol {
     flex: none;
+    width: var(--idw, 8ch);
+  }
+  .namecol {
+    flex: 1;
+  }
+  .did {
+    font-size: 9.5px;
+    color: var(--fg3);
+    white-space: nowrap;
+  }
+  .did.sub {
+    font-size: 9px;
+    color: var(--fg3);
+    opacity: 0.7;
+  }
+  .dtitle,
+  .dsubtitle {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dtitle {
+    font-size: 10.5px;
+  }
+  .dsubtitle {
+    font-size: 9.5px;
+    color: var(--fg3);
   }
   .cyc {
     font-size: 9.5px;
     color: var(--blocked);
-    flex: none;
   }
   .fine {
     font-size: 10px;
