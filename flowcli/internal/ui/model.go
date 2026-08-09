@@ -36,6 +36,8 @@ const (
 	OverlayHelp
 	OverlayCreate
 	OverlayPickParent
+	OverlayDepAdd
+	OverlayDepRemove
 	OverlayCascade
 	OverlayDelete
 	OverlayEdit
@@ -159,6 +161,18 @@ type Model struct {
 	fromFinder   bool
 	statusIdx    int
 	projectIdx   int
+
+	// dependency picker (E4): search-backed add (y) and cursor-based removal
+	// (d deps-focus, then x) in the detail view.
+	depCands  []depCand
+	depIdx    int
+	depQuery  string
+	depScroll int
+	depFocus  bool
+	depCursor int
+	// depRemove is the edge awaiting the remove-confirmation dialog; nil when
+	// no removal is pending.
+	depRemove *store.Dependency
 	confirmID    string
 	// deleteInfo holds the collateral for the deletion being confirmed, so
 	// the confirm dialog can name what will be deleted / kept / unblocked.

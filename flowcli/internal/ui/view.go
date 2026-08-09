@@ -411,13 +411,16 @@ func (m Model) viewDetail(w, h int) string {
 		body = append(body, "")
 	}
 
-	if bl, blk := m.blockers[node.ID], m.blocks[node.ID]; len(bl)+len(blk) > 0 {
+	if rows := m.depRows(node.ID); len(rows) > 0 {
+		m.depCursor = min(m.depCursor, len(rows)-1)
 		body = append(body, styles.DimS.Render("─ deps "+strings.Repeat("─", max(inner-7, 0))))
-		for _, id := range bl {
-			body = append(body, depLine("blocked by", id, m))
-		}
-		for _, id := range blk {
-			body = append(body, depLine("blocks", id, m))
+		for i, d := range rows {
+			marker := "  "
+			if m.depFocus && i == m.depCursor {
+				marker = styles.AccentS.Render("▸ ")
+			}
+			dir, other := depRowLabel(d, node.ID)
+			body = append(body, marker+depLine(dir, other, m))
 		}
 	}
 

@@ -127,6 +127,11 @@ func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case ScreenActivity:
 			m.screen = ScreenDetail
 		case ScreenDetail:
+			if m.depFocus {
+				// leave the deps list first; esc again navigates back
+				m.depFocus = false
+				break
+			}
 			if m.fromFinder {
 				// return to the finder with the same query, selection intact
 				m.fromFinder = false
@@ -146,6 +151,10 @@ func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// project or the create row). Let it fall through to the
 			// per-screen updateLanding handler below instead of opening
 			// a node's detail view.
+			break
+		}
+		if m.screen == ScreenDetail {
+			// Detail's own enter expands/collapses the selected step.
 			break
 		}
 		if n, ok := m.current(); ok {
@@ -173,6 +182,18 @@ func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "backspace", "delete":
+		// In deps-focus, backspace removes the highlighted edge (with a
+		// confirm) instead of deleting a node: deps are associations, not
+		// parts, so the nodes themselves are never touched.
+		if m.screen == ScreenDetail && m.depFocus {
+			rows := m.depRows(m.selectedID)
+			if len(rows) > 0 && m.depCursor < len(rows) {
+				d := rows[m.depCursor]
+				m.depRemove = &d
+				m.overlay = OverlayDepRemove
+			}
+			return m, nil
+		}
 		return m.tryDelete()
 	}
 
@@ -291,10 +312,30 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	steps := m.stepsOf(node.ID)
 	switch msg.String() {
 	case "j", "down":
+		if m.depFocus {
+			rows := m.depRows(node.ID)
+			if len(rows) > 0 {
+				m.depCursor = min(m.depCursor+1, len(rows)-1)
+			}
+			break
+		}
 		m.stepCursor = min(m.stepCursor+1, max(len(steps)-1, 0))
 	case "k", "up":
+		if m.depFocus {
+			m.depCursor = max(m.depCursor-1, 0)
+			break
+		}
 		m.stepCursor = max(m.stepCursor-1, 0)
 	case "tab":
+		// cycle between the steps list and the deps section
+		if len(m.depRows(node.ID)) > 0 {
+			m.depFocus = !m.depFocus
+			if m.depFocus {
+				m.depCursor = min(m.depCursor, len(m.depRows(node.ID))-1)
+			}
+		}
+	case "enter":
+		// expand or collapse the selected step's breakdown
 		if len(steps) > 0 {
 			id := steps[m.stepCursor].ID
 			m.openSteps[id] = !m.openSteps[id]
@@ -323,6 +364,16 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(steps) > 0 {
 			m.openEdit(steps[m.stepCursor].ID)
 		}
+	case "y":
+		// dependency add: search a blocker for this node
+		m.depQuery = ""
+		m.depIdx = 0
+		m.depScroll = 0
+		m.buildDepCands(node.ID)
+		m.input.SetValue("")
+		m.input.Placeholder = "blocker id or title"
+		m.input.Focus()
+		m.overlay = OverlayDepAdd
 	}
 	return m, nil
 }
@@ -348,6 +399,10 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateCreate(msg)
 	case OverlayPickParent:
 		return m.updateParentDrop(msg)
+	case OverlayDepAdd:
+		return m.updateDepAdd(msg)
+	case OverlayDepRemove:
+		return m.updateDepRemove(msg)
 	case OverlayEdit:
 		return m.updateEdit(msg)
 	case OverlayCascade:

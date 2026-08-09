@@ -41,6 +41,7 @@ type screenKeys struct {
 	Sibling  key.Binding
 	Edit     key.Binding
 	EditStep key.Binding
+	DepAdd   key.Binding
 }
 
 func kb(helpKey string, keys []string, desc string) key.Binding {
@@ -133,7 +134,8 @@ func detailKeys() screenKeys {
 	km.Up = kb("j / k", []string{"j", "up", "k", "down"}, "move cursor")
 	km.Left = key.Binding{}
 	km.Right = key.Binding{}
-	km.Tab = kb("tab", []string{"tab", " "}, "expand step")
+	km.Tab = kb("tab", []string{"tab"}, "focus deps")
+	km.Enter = kb("enter", []string{"enter"}, "expand step")
 	km.Verify = kb("v", []string{"v"}, "verify step")
 	km.Activity = kb("a", []string{"a"}, "activity panel")
 	km.Back = kb("esc", []string{"esc"}, "back up")
@@ -142,6 +144,7 @@ func detailKeys() screenKeys {
 	km.Sibling = kb("o", []string{"o"}, "new sibling")
 	km.Edit = kb("c", []string{"c"}, "edit title & condition")
 	km.EditStep = kb("C", []string{"C"}, "edit step")
+	km.DepAdd = kb("y", []string{"y"}, "add dependency")
 	return km
 }
 
@@ -152,6 +155,7 @@ func activityKeys() screenKeys {
 	km.Child = key.Binding{}
 	km.Edit = key.Binding{}
 	km.EditStep = key.Binding{}
+	km.DepAdd = key.Binding{}
 	km.Up = kb("j / k", []string{"j", "up", "k", "down"}, "scroll up")
 	km.Write = kb("i", []string{"i"}, "write message")
 	km.ScrollD = kb("j / k", []string{"j", "up", "k", "down"}, "scroll down")
@@ -232,7 +236,7 @@ func (m Model) viewHelpPanel(w, h int) string {
 		binds []key.Binding
 	}{
 		{"MOVE", cols[0], []key.Binding{km.Up, km.Down, km.Left, km.Right, km.Tab, km.Enter, km.Back}},
-		{"ACT", cols[1], []key.Binding{km.Status, km.Verify, km.Expand, km.Activity, km.Focus, km.NextWP, km.Write, km.ScrollD, km.Undo, km.Create, km.Child, km.Sibling, km.Edit, km.EditStep}},
+		{"ACT", cols[1], []key.Binding{km.Status, km.Verify, km.Expand, km.Activity, km.Focus, km.NextWP, km.Write, km.ScrollD, km.Undo, km.Create, km.Child, km.Sibling, km.Edit, km.EditStep, km.DepAdd}},
 		{"FIND & SCOPE", cols[2], []key.Binding{km.Find, km.Projects, km.Tree, km.ToggleDone, km.Lanes, km.Chain, km.Help, km.Quit}},
 	}
 

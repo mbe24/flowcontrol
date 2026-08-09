@@ -89,6 +89,10 @@ func (m Model) viewOverlay(w int) string {
 	switch m.overlay {
 	case OverlayCreate:
 		return m.viewCreate(w)
+	case OverlayDepAdd:
+		return m.viewDepAdd(w)
+	case OverlayDepRemove:
+		return m.viewDepRemove(w)
 	case OverlayEdit:
 		return m.viewEdit(w)
 	case OverlayCascade:
@@ -319,6 +323,72 @@ func (m Model) viewOverlay(w int) string {
 		return box("find", "", lines, w)
 	}
 	return ""
+}
+
+// viewDepRemove renders the remove-edge confirm dialog: the edge itself and
+// the two keys. An edge is an association, so the two tasks are never
+// mentioned as collateral.
+func (m Model) viewDepRemove(w int) string {
+	d := m.depRemove
+	var lines []string
+	lines = append(lines, "")
+	if d == nil {
+		lines = append(lines, styles.DimS.Render("nothing to remove"))
+	} else {
+		lines = append(lines, "  "+styles.FgS.Render(depRemoveLabel(m, *d)))
+		lines = append(lines, "")
+		lines = append(lines, styles.DimS.Render("only the dependency edge is removed; the node stays"))
+	}
+	lines = append(lines, "", styles.DimS.Render("[esc] cancel    ")+styles.AccentS.Render("[y] remove"))
+	return box("remove dependency?", "blocked", lines, w)
+}
+
+// viewDepAdd renders the search dialog for picking a blocker for the current
+// node: a filter line, the candidate list (cycle candidates dimmed with a
+// (cycle) reason and skipped by the cursor), and a fixed footer.
+func (m Model) viewDepAdd(w int) string {
+	id := m.selectedID
+	inner := finderInner
+	lines := []string{pad(m.input.View(), inner)}
+	lines = append(lines, styles.DimS.Render(strings.Repeat("─", inner)))
+
+	rows := make([]string, depVisible)
+	if len(m.depCands) == 0 {
+		rows[0] = pad(styles.DimS.Render("  no candidates"), inner)
+	} else {
+		visStart := min(m.depScroll, len(m.depCands))
+		visEnd := min(visStart+depVisible, len(m.depCands))
+		for k, i := 0, visStart; i < visEnd; i, k = i+1, k+1 {
+			c := m.depCands[i]
+			idCol := padTrunc(c.node.ID, 9)
+			titleCol := padTrunc(c.node.Title, inner-16)
+			marker := "  "
+			st := styles.FgS
+			if i == m.depIdx {
+				marker = styles.AccentS.Render("▸ ")
+				st = styles.BrightS
+			}
+			if c.cycle {
+			// Reserve room for the (cycle) suffix so the row never exceeds
+			// the fixed dialog width (pad never truncates).
+			cycleCol := padTrunc(c.node.Title, inner-16-10)
+			rows[k] = pad(styles.DimS.Render(marker+"◇ "+idCol+" "+cycleCol+"  (cycle)"), inner)
+			continue
+		}
+			glyph := styles.Status(c.node.Status).Render("●")
+			rows[k] = pad(marker+glyph+" "+st.Render(idCol+" "+titleCol), inner)
+		}
+	}
+	lines = append(lines, rows...)
+
+	sc := ""
+	if len(m.depCands) > depVisible {
+		sc = "  " + styles.DimS.Render(fmt.Sprintf("(%d/%d)", m.depIdx+1, len(m.depCands)))
+	}
+	foot := "  ↑↓ move   ↵ add blocker   esc close" + sc
+	lines = append(lines, styles.DimS.Render(strings.Repeat("─", inner)),
+		pad(styles.DimS.Render(foot), inner))
+	return box("add blocker for "+id, "", lines, w)
 }
 
 // unblockLines renders one unblocked dependent as a wrapped group: the first
