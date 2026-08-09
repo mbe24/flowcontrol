@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app, select, setStatus, toggleTask, toggleWp, passesAll } from '../lib/state.svelte';
-  import { buildIndex, stepRatio, stepsOf, tasksOf, workPackages, wpCounts } from '../lib/derive';
+  import { buildIndex, hueOf, stepRatio, stepsOf, tasksOf, workPackages, wpCounts } from '../lib/derive';
   import { STATUS_VAR, stepGlyph, verifyBadge } from '../lib/types';
   import type { FlowNode, Status } from '../lib/types';
   import InlineCreateRow from './InlineCreateRow.svelte';
@@ -106,6 +106,7 @@
       <div class="cardwp">
         <button class="wphead" onclick={() => toggleWp(wp.id)}>
           <span class="caret">{app.expandedWp[wp.id] ? '▾' : '▸'}</span>
+          <span class="wphue" class:muted={wp.state === 'PLANNED'} style:background={hueOf(app.nodes, wp.id)}></span>
           <span class="wpname">{wp.title}</span>
           <span class="mono wppct">{counts.pct}%</span>
         </button>
@@ -172,6 +173,7 @@
           <div class="cardwp">
             <button class="wphead" onclick={() => toggleWp(wp.id)}>
               <span class="caret">{app.expandedWp[wp.id] ? '▾' : '▸'}</span>
+              <span class="wphue dim" style:background={hueOf(app.nodes, wp.id)}></span>
               <span class="wpname dim">{wp.title}</span>
               <span class="mono wppct">{counts.pct}%</span>
             </button>
@@ -202,7 +204,7 @@
   <div class="rail">
     {#each wps as wp (wp.id)}
       <div class="railhead">
-        <span class="hue" style:background={STATUS_VAR[wp.state === 'ACTIVE' ? 'READY' : 'DEFERRED']}></span>
+        <span class="hue" style:background={hueOf(app.nodes, wp.id)}></span>
         <span class="rname">{wp.title}</span>
         <span class="mono rpct">{wpCounts(app.nodes, wp.id).pct}%</span>
       </div>
@@ -262,8 +264,8 @@
         onkeydown={(e) => e.key === 'Enter' && toggleWp(wp.id)}>
         <span class="caret">{app.expandedWp[wp.id] ? '▾' : '▸'}</span>
         <div class="wpname2">
-          <span class="mono tag">WP</span>
-          <span class="ellipsis strong">{wp.title}</span>
+          <span class="wphue" class:muted={wp.state === 'PLANNED' || wp.state === 'DONE'} style:background={hueOf(app.nodes, wp.id)}></span>
+          <span class="ellipsis strong" class:muted={wp.state === 'DONE'}>{wp.title}</span>
           <span
             class="mono state"
             style:color={wp.state === 'ACTIVE' ? 'var(--ready)' : 'var(--fg2)'}
@@ -488,12 +490,19 @@
     gap: 10px;
     min-width: 0;
   }
-  .tag {
-    font-size: 10px;
+.wphue {
+    width: 3px;
+    height: 14px;
+    border-radius: 2px;
+    flex: none;
+  }
+  /* Planned and done packages keep their hue but read as quieter than active
+     ones. The name only dims for done ones — planned stays readable. */
+  .wphue.muted {
+    opacity: 0.4;
+  }
+  .strong.muted {
     color: var(--fg3);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 1px 4px;
   }
   .strong {
     font-weight: 600;
@@ -877,6 +886,17 @@
   .wpname {
     font-size: 13px;
     font-weight: 600;
+  }
+  .wphead .wphue {
+    width: 3px;
+    height: 14px;
+    border-radius: 2px;
+    flex: none;
+  }
+  .wphue.dim {
+    /* Archives already grey the whole header; the bar keeps its hue so the
+       package is still identifiable, just washed out to match. */
+    opacity: 0.4;
   }
   .wppct {
     margin-left: auto;

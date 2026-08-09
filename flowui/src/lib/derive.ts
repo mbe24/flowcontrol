@@ -85,9 +85,40 @@ export function stepRatio(nodes: FlowNode[], taskId: string): { done: number; to
 
 const HUES = ['var(--hue-auth)', 'var(--hue-booking)', 'var(--hue-pay)', 'var(--hue-obs)', 'var(--hue-ui)'];
 
+/** djb2-style hash so similar ids ("T-101", "T-201") don't stick to the same slot. */
+function wpHash(id: string): number {
+  let h = 5381;
+  for (let i = 0; i < id.length; i++) h = ((h << 5) + h + id.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+/**
+ * One color per work package, derived deterministically from the whole project.
+ *
+ * The base slot is the wp's id hash; if an earlier work package (in id order)
+ * already holds that slot, probe one forward and take it when free, otherwise
+ * fall back to the hashed slot. It's a pure function of `nodes`, so table,
+ * lanes and graph each compute the same colors with no shared cache — and a
+ * collision is at most one neighbour, plus the id hash keeps adjacent, similar
+ * ids apart to begin with.
+ */
 export function hueOf(nodes: FlowNode[], wpId: string): string {
-  const i = workPackages(nodes).findIndex((w) => w.id === wpId);
-  return HUES[(i < 0 ? 0 : i) % HUES.length];
+  const ids = workPackages(nodes)
+    .map((w) => w.id)
+    .sort();
+  const taken = new Set<number>();
+  const slot = new Map<string, number>();
+  for (const id of ids) {
+    const base = wpHash(id) % HUES.length;
+    let s = base;
+    if (taken.has(base)) {
+      const alt = (base + 1) % HUES.length;
+      if (!taken.has(alt)) s = alt;
+    }
+    taken.add(s);
+    slot.set(id, s);
+  }
+  return HUES[slot.get(wpId) ?? (wpHash(wpId) % HUES.length)];
 }
 
 /** Would adding blocker → blocked close a cycle? */

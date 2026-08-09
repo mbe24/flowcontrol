@@ -6,7 +6,7 @@
     toggleWpFilter,
     activeFilterCount
   } from '../lib/state.svelte';
-  import { workPackages, tasksOf } from '../lib/derive';
+  import { workPackages, tasksOf, hueOf } from '../lib/derive';
 
   const wps = $derived(workPackages(app.nodes));
   const mobile = $derived(app.width < 860);
@@ -36,7 +36,7 @@
     {#each wps as w (w.id)}
       <label class="row">
         <input type="checkbox" checked={app.wpFilter.includes(w.id)} onchange={() => toggleWpFilter(w.id)} />
-        <span class="hue" style:background="var(--hue-{['auth', 'booking', 'pay', 'obs', 'ui'][wps.indexOf(w) % 5]})"></span>
+        <span class="hue" style:background={hueOf(app.nodes, w.id)}></span>
         <span class="name">{w.title}</span>
         <span class="mono count">{tasksOf(app.nodes, w.id).length}</span>
       </label>
