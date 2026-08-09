@@ -35,6 +35,7 @@ const (
 	OverlayComment
 	OverlayHelp
 	OverlayCreate
+	OverlayPickParent
 	OverlayCascade
 	OverlayDelete
 	OverlayEdit

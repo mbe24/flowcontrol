@@ -346,6 +346,8 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.overlay {
 	case OverlayCreate:
 		return m.updateCreate(msg)
+	case OverlayPickParent:
+		return m.updateParentDrop(msg)
 	case OverlayEdit:
 		return m.updateEdit(msg)
 	case OverlayCascade:

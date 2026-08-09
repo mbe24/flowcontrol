@@ -86,6 +86,29 @@ func TestHelpOverlayRenders(t *testing.T) {
 	}
 }
 
+// The tree keymap exposes both O (new child) and o (new sibling), and the
+// help panel lists them in the ACT lane.
+func TestHelpKeymapSibling(t *testing.T) {
+	km := kmFor(ScreenTree)
+	if !km.Child.Enabled() || !km.Sibling.Enabled() {
+		t.Fatal("tree keymap must bind O (child) and o (sibling)")
+	}
+	if !containsPlain(km.Sibling.Help().Key, "o") || !containsPlain(km.Sibling.Help().Desc, "sibling") {
+		t.Fatalf("sibling binding wrong: %q", km.Sibling.Help())
+	}
+
+	m := loadModel(t)
+	m.screen = ScreenTree
+	m.overlay = OverlayHelp
+	m.width, m.height = 100, 20
+	plain := stripANSI(m.View())
+	for _, probe := range []string{"new child", "new sibling"} {
+		if !containsPlain(plain, probe) {
+			t.Errorf("? help panel missing %q", probe)
+		}
+	}
+}
+
 
 func kmFor(s Screen) screenKeys {
 	switch s {

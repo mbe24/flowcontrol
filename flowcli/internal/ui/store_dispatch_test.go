@@ -17,9 +17,11 @@ func fixtureContent() ([]store.Project, []store.Node, []store.Dependency, []stor
 	projects := []store.Project{{ID: "prj-travel", Name: "Travel Webapp", Description: "Booking flow."}}
 	nodes := []store.Node{
 		{ID: "WP-AUTH", ProjectID: "prj-travel", Type: store.WorkPackage, Title: "Authentication", Status: store.Ready},
+		{ID: "WP-PAY", ProjectID: "prj-travel", Type: store.WorkPackage, Title: "Payments", Status: store.Ready},
 		{ID: "T-1042", ProjectID: "prj-travel", ParentID: "WP-AUTH", Type: store.Task, Title: "Device-code flow", Status: store.Ready,
 			Condition: "pnpm test:auth --grep device", Verification: store.Verification{Agent: store.Pass}},
 		{ID: "T-1042.1", ProjectID: "prj-travel", ParentID: "T-1042", Type: store.Step, Title: "Register client", Status: store.Done},
+		{ID: "T-2010", ProjectID: "prj-travel", ParentID: "WP-PAY", Type: store.Task, Title: "Checkout session", Status: store.Ready},
 	}
 	deps := []store.Dependency{}
 	activity := []store.ActivityEntry{}

@@ -60,6 +60,13 @@ func box(title, titleColour string, lines []string, w int) string {
 // transparent foreground layer on top, so the underlying view stays fully
 // visible around the dialog instead of being blanked out.
 func overlay(main, ov string, w, h int) string {
+	return overlayAt(main, ov, w, h, 0, 0)
+}
+
+// overlayAt is overlay() with a positional offset (dx, dy) applied to the
+// dialog layer, so a secondary dialog can sit slightly down-right of the
+// primary one instead of exactly on top of it.
+func overlayAt(main, ov string, w, h, dx, dy int) string {
 	ovLines := strings.Split(strings.TrimRight(ov, "\n"), "\n")
 	ovW := 0
 	for _, l := range ovLines {
@@ -69,8 +76,8 @@ func overlay(main, ov string, w, h int) string {
 	}
 	ovH := len(ovLines)
 
-	x := max((w-ovW)/2, 0)
-	y := max((h-ovH)/2, 0)
+	x := max((w-ovW)/2+dx, 0)
+	y := max((h-ovH)/2+dy, 0)
 
 	bg := lv2.NewLayer(main).X(0).Y(0).Z(0)
 	dlg := lv2.NewLayer(ov).X(x).Y(y).Z(1)

@@ -168,6 +168,12 @@ func (m Model) View() string {
 		// Help is a full-screen panel rather than a centred dialog.
 		return m.viewHelpPanel(w, h)
 	}
+	if m.overlay == OverlayPickParent {
+		// The parent picker floats over the create form, shifted slightly
+		// down-right so its edges stay visible around the form.
+		base := overlay(main, m.viewCreate(w), w, h)
+		return overlayAt(base, m.viewPickParent(w), w, h, 14, 2)
+	}
 	if ov := m.viewOverlay(w); ov != "" {
 		return overlay(main, ov, w, h)
 	}
