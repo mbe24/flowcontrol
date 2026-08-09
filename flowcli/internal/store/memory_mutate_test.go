@@ -25,7 +25,7 @@ func TestMemoryUpdateNode(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, "Rewritten title", got.Title)
 	require.Equal(t, "npm run test:new", got.Condition)
-	require.Equal(t, NoReport, got.Verification.Agent, "editing condition must mark report stale")
+	require.Equal(t, Stale, got.Verification.Agent, "editing condition must mark the agent report stale")
 }
 
 // Deleting a node with a descendant removes both, plus any edge touching them.

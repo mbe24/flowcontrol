@@ -37,6 +37,7 @@ const (
 	OverlayCreate
 	OverlayCascade
 	OverlayDelete
+	OverlayEdit
 )
 
 // Lane layout thresholds, derived from the drawn card widths:
@@ -72,6 +73,14 @@ type row struct {
 	depth    int
 	isWP     bool
 	expanded bool
+}
+
+// editState is everything the inline-edit dialog (c in detail) needs: the
+// form plus the id of the node being edited so submit knows what to write.
+type editState struct {
+	nodeID string
+	form   Form
+	errAt  int
 }
 
 // deleteCollateral describes what deleting a node will remove, keep or
@@ -163,6 +172,8 @@ type Model struct {
 	create  createState
 	landing landingState
 	cascade cascadeState
+	// edit (Phase E inline edit, c in detail)
+	edit editState
 }
 
 func New(s store.Store) Model {
@@ -183,6 +194,7 @@ func New(s store.Store) Model {
 		height:    40,
 		landing:   landingState{},
 		create:    createState{errAt: -1},
+		edit:      editState{errAt: -1},
 	}
 }
 

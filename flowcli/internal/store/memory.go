@@ -389,10 +389,12 @@ func (m *Memory) UpdateNode(_ context.Context, nodeID string, updates NodeUpdate
 		}
 		if updates.Condition != nil {
 			m.nodes[i].Condition = *updates.Condition
-			// Editing the condition invalidates the last agent report.
-			m.nodes[i].Verification.Agent = NoReport
-			m.nodes[i].Verification.AgentName = ""
-			m.nodes[i].Verification.AgentWhen = ""
+			// Editing the condition invalidates the last agent report. The
+			// report itself stays readable (name/when are retained); the
+			// stale flag is the derived rule both backends agree on — the
+			// gRPC adapter reads it off the proto, the memory store computes
+			// it here (updated_at > agent_node_rev).
+			m.nodes[i].Verification.Agent = Stale
 			m.push(nodeID, ActEdit, "Edited the condition — agent report marked stale")
 		}
 		return nil

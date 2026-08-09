@@ -82,6 +82,8 @@ func (m Model) viewOverlay(w int) string {
 	switch m.overlay {
 	case OverlayCreate:
 		return m.viewCreate(w)
+	case OverlayEdit:
+		return m.viewEdit(w)
 	case OverlayCascade:
 		return m.viewCascade(w)
 	case OverlayDelete:

@@ -90,6 +90,10 @@ func (m Model) updateScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "c":
+		if m.screen == ScreenDetail {
+			// inline edit of title / condition lives in updateDetail
+			break
+		}
 		// full create form, kind unlocked
 		parent := ""
 		if n, ok := m.current(); ok && n.Type == store.WorkPackage {
@@ -310,6 +314,14 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "a":
 		m.screen = ScreenActivity
 		m.activityScrl = 0
+	case "c":
+		// inline edit of title / condition (designer: c in detail)
+		m.openEdit(node.ID)
+	case "C":
+		// edit the currently selected step's title / condition
+		if len(steps) > 0 {
+			m.openEdit(steps[m.stepCursor].ID)
+		}
 	}
 	return m, nil
 }
@@ -333,6 +345,8 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.overlay {
 	case OverlayCreate:
 		return m.updateCreate(msg)
+	case OverlayEdit:
+		return m.updateEdit(msg)
 	case OverlayCascade:
 		return m.updateCascade(msg)
 	case OverlayDelete:
