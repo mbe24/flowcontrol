@@ -37,3 +37,4 @@ anyhow = "1"
 
 [dev-dependencies]
 proptest = "1"
+prost = "0.13" # dispatch round-trip tests encode/decode proto messages

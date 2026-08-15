@@ -1171,6 +1171,108 @@ impl Store for SqliteStore {
     }
 }
 
+impl SqliteStore {
+    /// Transport-agnostic entry point — "the service minus the socket". Decodes a
+    /// protobuf request for `method`, runs the synchronous store operation, and
+    /// returns the encoded protobuf response. The native tonic edge, the Node
+    /// host, and the browser all funnel through this one call; it is the seam the
+    /// wasm `#[wasm_bindgen]` facade wraps. Unary only — `Watch` streaming stays a
+    /// native-edge concern. `method` is the proto RPC name (e.g. "CreateNode").
+    pub fn dispatch(&self, method: &str, req: &[u8]) -> DResult<Vec<u8>> {
+        use prost::Message;
+        fn decode<T: Message + Default>(bytes: &[u8]) -> DResult<T> {
+            T::decode(bytes).map_err(|e| DomainError::invalid_argument(format!("bad request: {e}")))
+        }
+        Ok(match method {
+            // Reads
+            "ListProjects" => {
+                let r: pb::ListProjectsRequest = decode(req)?;
+                let projects = self.list_projects_locked(r.include_archived)?;
+                pb::ListProjectsResponse { projects }.encode_to_vec()
+            }
+            "GetSnapshot" => {
+                let r: pb::GetSnapshotRequest = decode(req)?;
+                self.get_snapshot_locked(&r.project_id)?.encode_to_vec()
+            }
+            "ListEvents" => {
+                let r: pb::ListEventsRequest = decode(req)?;
+                let (events, has_more) =
+                    self.list_events_locked(&r.project_id, &r.node_id, r.before_seq, r.limit)?;
+                pb::ListEventsResponse { events, has_more }.encode_to_vec()
+            }
+            "Search" => {
+                let r: pb::SearchRequest = decode(req)?;
+                let nodes = self.search_locked(&r.project_id, &r.query, r.limit)?;
+                pb::SearchResponse { nodes }.encode_to_vec()
+            }
+            "PollChanges" => {
+                let r: pb::PollChangesRequest = decode(req)?;
+                self.poll_changes_locked(&r.project_id, r.after_seq, r.limit)?
+                    .encode_to_vec()
+            }
+            // Writes (node/dep/status/etc. → Mutation)
+            "CreateNode" => {
+                let m = self.create_node_locked(decode(req)?)?;
+                pb::CreateNodeResponse { mutation: Some(m) }.encode_to_vec()
+            }
+            "UpdateNode" => {
+                let m = self.update_node_locked(decode(req)?)?;
+                pb::UpdateNodeResponse { mutation: Some(m) }.encode_to_vec()
+            }
+            "DeleteNode" => {
+                let m = self.delete_node_locked(decode(req)?)?;
+                pb::DeleteNodeResponse { mutation: Some(m) }.encode_to_vec()
+            }
+            "SetStatus" => {
+                let m = self.set_status_locked(decode(req)?)?;
+                pb::SetStatusResponse { mutation: Some(m) }.encode_to_vec()
+            }
+            "AddDependency" => {
+                let m = self.add_dependency_locked(decode(req)?)?;
+                pb::AddDependencyResponse { mutation: Some(m) }.encode_to_vec()
+            }
+            "RemoveDependency" => {
+                let m = self.remove_dependency_locked(decode(req)?)?;
+                pb::RemoveDependencyResponse { mutation: Some(m) }.encode_to_vec()
+            }
+            "ReportCondition" => {
+                let m = self.report_condition_locked(decode(req)?)?;
+                pb::ReportConditionResponse { mutation: Some(m) }.encode_to_vec()
+            }
+            "SetVerdict" => {
+                let m = self.set_verdict_locked(decode(req)?)?;
+                pb::SetVerdictResponse { mutation: Some(m) }.encode_to_vec()
+            }
+            "AddComment" => {
+                let m = self.add_comment_locked(decode(req)?)?;
+                pb::AddCommentResponse { mutation: Some(m) }.encode_to_vec()
+            }
+            "Undo" => {
+                let m = self.undo_locked(decode(req)?)?;
+                pb::UndoResponse { mutation: Some(m) }.encode_to_vec()
+            }
+            "MoveNode" => {
+                let m = self.move_node_locked(decode(req)?)?;
+                pb::MoveNodeResponse { mutation: Some(m) }.encode_to_vec()
+            }
+            // Project lifecycle → Project
+            "CreateProject" => {
+                let p = self.create_project_locked(decode(req)?)?;
+                pb::CreateProjectResponse { project: Some(p) }.encode_to_vec()
+            }
+            "UpdateProject" => {
+                let p = self.update_project_locked(decode(req)?)?;
+                pb::UpdateProjectResponse { project: Some(p) }.encode_to_vec()
+            }
+            "ArchiveProject" => {
+                let p = self.archive_project_locked(decode(req)?)?;
+                pb::ArchiveProjectResponse { project: Some(p) }.encode_to_vec()
+            }
+            other => return Err(DomainError::not_found(format!("unknown method: {other}"))),
+        })
+    }
+}
+
 // ── shared write helpers (free fns over a &Connection; a &Transaction coerces) ─
 
 /// Build the shared mutation payload for a committed write, publish it to Watch
