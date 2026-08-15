@@ -7,3 +7,6 @@ plan/
 
 # npm workspace root
 node_modules/
+
+# pnpm local store cache
+.pnpm-store/

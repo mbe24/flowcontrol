@@ -23,21 +23,37 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # flowui's standalone build runs flowcore in the browser, so the wasm glue
+      # (gitignored, generated) must exist before the Vite build. Build it natively
+      # for wasm32 and copy it in — the same recipe as `npm run gen:wasm`, without Docker.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Generate the wasm glue (web target)
+        run: |
+          cargo install wasm-bindgen-cli --version 0.2.127 --locked
+          cargo build -p flowwasm --target wasm32-unknown-unknown --release
+          wasm-bindgen --target web --out-dir flowwasm/pkg-web \
+            target/wasm32-unknown-unknown/release/flowwasm.wasm
+          sh flowui/scripts/copy-wasm.sh
+
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-          cache: "npm"
-          cache-dependency-path: package-lock.json
+          cache: "pnpm"
 
       - name: Install dependencies (workspace root)
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
-      # Demo build: in-memory fixtures (no backend) — build:demo (VITE_DEMO=1).
+      # Demo build: the in-browser flowcore engine over OPFS (VITE_DEMO=1).
       # BASE_PATH = the project-site subpath (/<repo>); a user/org site would use "".
       - name: Build the web app demo
         env:
           BASE_PATH: /${{ github.event.repository.name }}
-        run: npm run build:demo -w flowui
+        run: pnpm --filter flowui build:demo
 
       - uses: actions/configure-pages@v5
 

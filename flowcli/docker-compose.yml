@@ -64,12 +64,15 @@ services:
     # daemon. Bind 0.0.0.0 + FLOW_ALLOWED_HOSTS so the sibling container can reach it
     # by service name — the daemon is loopback-only by default.
     command:
+      # Hoisted node-linker → a flat node_modules under the volume overlay (below),
+      # so pnpm never writes symlink farms into the mounted host workspace dirs.
       - sh
       - -c
-      - "npm ci --no-audit --no-fund --silent && node --experimental-sqlite --import tsx flowdjs/src/index.ts --addr 0.0.0.0:50051 --db :memory: --seed"
+      - "corepack pnpm install --frozen-lockfile --config.node-linker=hoisted && node --experimental-sqlite --import tsx flowdjs/src/index.ts --addr 0.0.0.0:50051 --db :memory: --seed"
     environment:
       FLOW_ALLOWED_HOSTS: "flowdjs:50051"
       FLOWD_HOME: /tmp/flowhome
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
       # A provisioned token so the sibling container can authenticate (it can't read
       # this container's session.json). Exercises the real bearer-token path.
       FLOW_TOKEN: "it-shared-token"

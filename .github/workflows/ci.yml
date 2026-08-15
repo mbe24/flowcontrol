@@ -12,24 +12,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      
+
+      # flowui bundles the flowcore wasm; generate the glue (gitignored) first,
+      # natively for wasm32 — the same recipe as `npm run gen:wasm`, without Docker.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Generate the wasm glue (web target)
+        run: |
+          cargo install wasm-bindgen-cli --version 0.2.127 --locked
+          cargo build -p flowwasm --target wasm32-unknown-unknown --release
+          wasm-bindgen --target web --out-dir flowwasm/pkg-web \
+            target/wasm32-unknown-unknown/release/flowwasm.wasm
+          sh flowui/scripts/copy-wasm.sh
+
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-          cache: "npm"
-          cache-dependency-path: package-lock.json
+          cache: "pnpm"
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Type + Svelte check
-        run: npm run check -w flowui
+        run: pnpm --filter flowui check
 
       - name: Test
-        run: npm run test -w flowui
+        run: pnpm --filter flowui test
 
       - name: Build
-        run: npm run build -w flowui
+        run: pnpm --filter flowui build
 
   go:
     name: Go TUI (flowcli · vet · test · build)
@@ -103,20 +117,21 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-          cache: "npm"
-          cache-dependency-path: package-lock.json
+          cache: "pnpm"
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        run: npm run typecheck -w flowmcp
+        run: pnpm --filter flowmcp typecheck
 
       - name: Test
-        run: npm run test -w flowmcp
+        run: pnpm --filter flowmcp test
 
   mcp-integration:
     name: MCP (flowmcp · integration · real flowd)
@@ -125,14 +140,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-          cache: "npm"
-          cache-dependency-path: package-lock.json
+          cache: "pnpm"
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Download flowd binary
         uses: actions/download-artifact@v4
@@ -157,4 +173,4 @@ jobs:
         env:
           RUN_INTEGRATION: "1"
           FLOWD_ADDR: http://127.0.0.1:50051
-        run: npm run test:integration -w flowmcp
+        run: pnpm --filter flowmcp test:integration

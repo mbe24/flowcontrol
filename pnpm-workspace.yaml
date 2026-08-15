@@ -1,0 +1,15 @@
+# pnpm workspace (replaces npm's package.json "workspaces" field). pnpm is used
+# for the TypeScript packages because npm's optional-dependencies/workspaces
+# handling on Windows repeatedly dropped platform binaries (rollup, esbuild) and
+# bin shims. pnpm's content-addressable store + strict symlinked node_modules are
+# reliable across OSes. Run via corepack: `corepack pnpm install`.
+packages:
+  - flowui
+  - flowmcp
+  - flowdjs
+  - shared/flowapi
+# Allow only these dependencies to run install scripts (pnpm blocks them by
+# default). esbuild fetches its platform binary in a postinstall; vite/tsx/tsup
+# all rely on it.
+allowBuilds:
+  esbuild: true

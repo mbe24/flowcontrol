@@ -13,8 +13,8 @@
     "test:integration": "vitest run src/integration.test.ts"
   },
   "dependencies": {
-    "@flow/api": "0.1.0",
-    "flowdjs": "*",
+    "@flow/api": "workspace:*",
+    "flowdjs": "workspace:*",
     "@modelcontextprotocol/server": "^2.0.0",
     "@connectrpc/connect": "^2.1.2",
     "@connectrpc/connect-node": "^2.1.2",

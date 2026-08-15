@@ -2,24 +2,19 @@
   "name": "flowcontrol",
   "private": true,
   "version": "0.1.0",
-  "description": "FlowControl - a multi-language task graph ecosystem. npm workspace for the TypeScript clients.",
-  "workspaces": [
-    "flowui",
-    "flowmcp",
-    "flowdjs",
-    "shared/flowapi"
-  ],
+  "description": "FlowControl - a multi-language task graph ecosystem. pnpm workspace for the TypeScript clients.",
+  "packageManager": "pnpm@11.22.0",
   "scripts": {
     "gen:wasm": "sh scripts/gen-wasm.sh",
     "test:flowd": "node scripts/runner.mjs test:flowd",
     "build:flowd": "node scripts/runner.mjs build:flowd",
     "check:flowd": "node scripts/runner.mjs check:flowd",
-    "dev:mcp": "npm run dev -w flowmcp",
-    "test:mcp": "npm run test -w flowmcp",
-    "typecheck:mcp": "npm run typecheck -w flowmcp",
-    "dev:flowdjs": "npm run dev -w flowdjs",
-    "test:flowdjs": "npm run test -w flowdjs",
-    "typecheck:flowdjs": "npm run typecheck -w flowdjs",
+    "dev:mcp": "pnpm --filter flowmcp dev",
+    "test:mcp": "pnpm --filter flowmcp test",
+    "typecheck:mcp": "pnpm --filter flowmcp typecheck",
+    "dev:flowdjs": "pnpm --filter flowdjs dev",
+    "test:flowdjs": "pnpm --filter flowdjs test",
+    "typecheck:flowdjs": "pnpm --filter flowdjs typecheck",
     "test:flowcli": "node scripts/runner.mjs test:flowcli"
   }
 }
