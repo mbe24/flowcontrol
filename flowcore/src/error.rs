@@ -29,6 +29,19 @@ pub enum Code {
     Internal,
 }
 
+impl Code {
+    /// A stable lowercase name (mirrors gRPC status names) so non-Rust hosts
+    /// (the wasm facade → Node/browser) can map it to a Connect/gRPC status.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Code::NotFound => "not_found",
+            Code::InvalidArgument => "invalid_argument",
+            Code::FailedPrecondition => "failed_precondition",
+            Code::Internal => "internal",
+        }
+    }
+}
+
 /// A domain error: a [`Code`] plus the original human-readable message (which may
 /// be a SQLite trigger `RAISE(ABORT, …)` string — preserved verbatim so nothing
 /// is lost across a host boundary).

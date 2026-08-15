@@ -1,0 +1,19 @@
+# `flowcore` compiled to wasm + a wasm-bindgen `dispatch` facade for JS hosts
+# (the Node daemon and the browser). SQLite lives inside the wasm (flowcore's
+# wasm build uses rusqlite's sqlite-wasm-rs backend). Build:
+#   cargo build -p flowwasm --target wasm32-unknown-unknown
+# with clang-16 + CC_wasm32_unknown_unknown / CFLAGS_wasm32_unknown_unknown=-std=gnu2x
+# (see plan/phase3.wasm-findings.md), then wasm-bindgen for the JS glue.
+[package]
+name = "flowwasm"
+version = "0.1.0"
+edition = "2021"
+description = "flowcore as a wasm module with a JS dispatch facade"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Default features (no `grpc`) → the tonic-free, wasm-safe core.
+flowcore = { path = "../flowcore" }
+wasm-bindgen = "0.2"

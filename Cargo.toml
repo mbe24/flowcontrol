@@ -1,6 +1,10 @@
-# Workspace: the shared `flowcore` (target-agnostic sync core — compiles to wasm)
-# and `flowd` (the native gRPC daemon built on it). A future `flowwasm` cdylib
-# will also depend on `flowcore`.
+# Workspace: the shared `flowcore` (target-agnostic sync core) and the hosts
+# built on it — `flowd` (native gRPC daemon) and `flowwasm` (wasm cdylib for the
+# TS/browser daemons). `flowwasm` is excluded from `default-members`, so ordinary
+# `cargo build`/`cargo test` (and native CI) never build it — no stray native
+# cdylib. It is built explicitly for wasm: `cargo build -p flowwasm --target
+# wasm32-unknown-unknown`.
 [workspace]
-members = ["flowcore", "flowd"]
+members = ["flowcore", "flowd", "flowwasm"]
+default-members = ["flowcore", "flowd"]
 resolver = "2"
