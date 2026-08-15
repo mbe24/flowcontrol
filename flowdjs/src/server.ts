@@ -61,6 +61,16 @@ const EXTRA_ORIGINS = new Set(
     .map((s) => s.trim())
     .filter(Boolean)
 );
+// Extra Host values to accept beyond loopback — e.g. a compose service name
+// ("flowdjs:50051"), a LAN host, or a hosted domain. Default empty, so the daemon
+// is loopback-only out of the box; this is the knob that also makes cross-host
+// integration tests possible without weakening the default (bind with --addr 0.0.0.0).
+const EXTRA_HOSTS = new Set(
+  (process.env.FLOW_ALLOWED_HOSTS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
 
 /** The hostname portion of a `Host`/authority value, minus port and IPv6 brackets. */
 function hostOnly(host: string): string {
@@ -69,8 +79,11 @@ function hostOnly(host: string): string {
   return i === -1 ? host : host.slice(0, i);
 }
 
-function isLoopbackHost(host: string | undefined): boolean {
-  return typeof host === "string" && LOOPBACK.has(hostOnly(host));
+function isAllowedHost(host: string | undefined): boolean {
+  if (typeof host !== "string") return false;
+  if (LOOPBACK.has(hostOnly(host))) return true;
+  // Match either the full authority ("flowdjs:50051") or just the hostname.
+  return EXTRA_HOSTS.has(host) || EXTRA_HOSTS.has(hostOnly(host));
 }
 
 function isAllowedOrigin(origin: string): boolean {
@@ -87,8 +100,9 @@ function withCors(handler: NodeHandler): NodeHandler {
   const allowHeaders = [...cors.allowedHeaders, "Authorization"].join(", ");
   const exposeHeaders = cors.exposedHeaders.join(", ");
   return (req, res) => {
-    // DNS-rebind defense: only serve requests addressed to a loopback host.
-    if (!isLoopbackHost(req.headers.host)) {
+    // DNS-rebind defense: only serve requests addressed to a loopback host (or an
+    // explicitly allowed one via FLOW_ALLOWED_HOSTS).
+    if (!isAllowedHost(req.headers.host)) {
       res.statusCode = 421; // Misdirected Request
       res.end("bad host");
       return;

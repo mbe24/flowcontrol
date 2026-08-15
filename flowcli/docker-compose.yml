@@ -51,8 +51,63 @@ services:
       CARGO_TARGET_DIR: /tmp/target
       RUST_LOG: info
 
+  # ── integration ("it" profile): flowcli ↔ flowd.js over the wire ─────────────
+  # Proves the connect-go gRPC-web transport against a real flowd.js (Node + wasm
+  # over node:sqlite). Run from this directory:
+  #   docker compose --profile it run --rm flowcli-it
+  # flowcli-it waits for flowdjs to be healthy, then runs the gated Go test.
+  flowdjs:
+    profiles: ["it"]
+    image: node:22
+    working_dir: /work
+    # Install Linux deps into a volume (never the host's node_modules), then run the
+    # daemon. Bind 0.0.0.0 + FLOW_ALLOWED_HOSTS so the sibling container can reach it
+    # by service name — the daemon is loopback-only by default.
+    command:
+      - sh
+      - -c
+      - "npm ci --no-audit --no-fund --silent && node --experimental-sqlite --import tsx flowdjs/src/index.ts --addr 0.0.0.0:50051 --db :memory: --seed"
+    environment:
+      FLOW_ALLOWED_HOSTS: "flowdjs:50051"
+      FLOWD_HOME: /tmp/flowhome
+    volumes:
+      - type: bind
+        source: ..
+        target: /work
+      - flowcli-it-node-modules:/work/node_modules
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://127.0.0.1:50051/', r => process.exit(0)).on('error', () => process.exit(1))"
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 240s
+
+  flowcli-it:
+    profiles: ["it"]
+    image: golang:1.26
+    working_dir: /work/flowcli
+    command: ["go", "test", "-run", "Integration", "-count=1", "-v", "./internal/store"]
+    environment:
+      FLOWCLI_IT_ADDR: "http://flowdjs:50051"
+    depends_on:
+      flowdjs:
+        condition: service_healthy
+    volumes:
+      - type: bind
+        source: ..
+        target: /work
+      - flowcli-go-mod:/go/pkg/mod
+      - flowcli-go-build:/root/.cache/go-build
+
 volumes:
   flowcli-flowd-cargo:
     name: flowcli-flowd-cargo
   flowcli-flowd-target:
     name: flowcli-flowd-target
+  flowcli-it-node-modules:
+  flowcli-go-mod:
+  flowcli-go-build:
