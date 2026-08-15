@@ -1,6 +1,7 @@
 //! FlowControl core daemon (`flowd`).
 
 pub mod db;
+pub mod error;
 pub mod generated {
     pub mod flow_v1 {
         // flow.v1.rs ends with `include!("flow.v1.tonic.rs")`, so this single

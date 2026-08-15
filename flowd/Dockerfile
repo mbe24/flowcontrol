@@ -1,7 +1,9 @@
 # Dev/test image for flowd. Builds and runs in a Linux container so a host whose
 # policy blocks native build scripts (Windows sandbox: "Access is denied" on
 # build-script-build) can still compile and test the crate. Cache volumes +
-# CARGO_TARGET_DIR redirection keep rebuilds fast (see scripts/native-runner.mjs).
+# CARGO_TARGET_DIR redirection keep rebuilds fast (see docker-compose.yml). Run
+# tests/build via root npm scripts: `npm run test:flowd` / `build:flowd` /
+# `check:flowd` (each wraps `docker compose run --rm flowd <cargo …>`).
 #
 # Layer strategy (few, explicitly ordered so the cheap layer is cached longest):
 #   1. WORKDIR                     - trivial, earliest so it need not re-run

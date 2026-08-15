@@ -16,6 +16,8 @@ export interface NewNode {
   title: string;
   description?: string[];
   condition?: string;
+  /** STEP only — its body/detail, same field the detail pane edits later. */
+  note?: string;
 }
 
 export interface NodePatch {

@@ -191,6 +191,33 @@ pub mod flow_service_client {
                 .insert(GrpcMethod::new("flow.v1.FlowService", "Search"));
             self.inner.unary(req, path, codec).await
         }
+        /** Unary forward poll of the event log — the stateless substitute for Watch.
+*/
+        pub async fn poll_changes(
+            &mut self,
+            request: impl tonic::IntoRequest<super::PollChangesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::PollChangesResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/flow.v1.FlowService/PollChanges",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("flow.v1.FlowService", "PollChanges"));
+            self.inner.unary(req, path, codec).await
+        }
         /** The one long-lived call. Every client holds exactly one.
 */
         pub async fn watch(
@@ -481,6 +508,114 @@ pub mod flow_service_client {
             req.extensions_mut().insert(GrpcMethod::new("flow.v1.FlowService", "Undo"));
             self.inner.unary(req, path, codec).await
         }
+        /** Moves a node to a new parent and/or changes its kind.
+*/
+        pub async fn move_node(
+            &mut self,
+            request: impl tonic::IntoRequest<super::MoveNodeRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::MoveNodeResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/flow.v1.FlowService/MoveNode",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("flow.v1.FlowService", "MoveNode"));
+            self.inner.unary(req, path, codec).await
+        }
+        /** Creates a project (namespace op; returns the created Project).
+*/
+        pub async fn create_project(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CreateProjectRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CreateProjectResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/flow.v1.FlowService/CreateProject",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("flow.v1.FlowService", "CreateProject"));
+            self.inner.unary(req, path, codec).await
+        }
+        /** Edits a project's name/description.
+*/
+        pub async fn update_project(
+            &mut self,
+            request: impl tonic::IntoRequest<super::UpdateProjectRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UpdateProjectResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/flow.v1.FlowService/UpdateProject",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("flow.v1.FlowService", "UpdateProject"));
+            self.inner.unary(req, path, codec).await
+        }
+        /** Archives or un-archives a project.
+*/
+        pub async fn archive_project(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ArchiveProjectRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ArchiveProjectResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/flow.v1.FlowService/ArchiveProject",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("flow.v1.FlowService", "ArchiveProject"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -523,6 +658,15 @@ pub mod flow_service_server {
             &self,
             request: tonic::Request<super::SearchRequest>,
         ) -> std::result::Result<tonic::Response<super::SearchResponse>, tonic::Status>;
+        /** Unary forward poll of the event log — the stateless substitute for Watch.
+*/
+        async fn poll_changes(
+            &self,
+            request: tonic::Request<super::PollChangesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::PollChangesResponse>,
+            tonic::Status,
+        >;
         /// Server streaming response type for the Watch method.
         type WatchStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::WatchResponse, tonic::Status>,
@@ -622,6 +766,42 @@ pub mod flow_service_server {
             &self,
             request: tonic::Request<super::UndoRequest>,
         ) -> std::result::Result<tonic::Response<super::UndoResponse>, tonic::Status>;
+        /** Moves a node to a new parent and/or changes its kind.
+*/
+        async fn move_node(
+            &self,
+            request: tonic::Request<super::MoveNodeRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::MoveNodeResponse>,
+            tonic::Status,
+        >;
+        /** Creates a project (namespace op; returns the created Project).
+*/
+        async fn create_project(
+            &self,
+            request: tonic::Request<super::CreateProjectRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CreateProjectResponse>,
+            tonic::Status,
+        >;
+        /** Edits a project's name/description.
+*/
+        async fn update_project(
+            &self,
+            request: tonic::Request<super::UpdateProjectRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UpdateProjectResponse>,
+            tonic::Status,
+        >;
+        /** Archives or un-archives a project.
+*/
+        async fn archive_project(
+            &self,
+            request: tonic::Request<super::ArchiveProjectRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ArchiveProjectResponse>,
+            tonic::Status,
+        >;
     }
     /** The FlowControl core API: reads, the Watch stream, and mutations.
 */
@@ -873,6 +1053,52 @@ pub mod flow_service_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = SearchSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/flow.v1.FlowService/PollChanges" => {
+                    #[allow(non_camel_case_types)]
+                    struct PollChangesSvc<T: FlowService>(pub Arc<T>);
+                    impl<
+                        T: FlowService,
+                    > tonic::server::UnaryService<super::PollChangesRequest>
+                    for PollChangesSvc<T> {
+                        type Response = super::PollChangesResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::PollChangesRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as FlowService>::poll_changes(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = PollChangesSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -1378,6 +1604,190 @@ pub mod flow_service_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = UndoSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/flow.v1.FlowService/MoveNode" => {
+                    #[allow(non_camel_case_types)]
+                    struct MoveNodeSvc<T: FlowService>(pub Arc<T>);
+                    impl<
+                        T: FlowService,
+                    > tonic::server::UnaryService<super::MoveNodeRequest>
+                    for MoveNodeSvc<T> {
+                        type Response = super::MoveNodeResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::MoveNodeRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as FlowService>::move_node(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = MoveNodeSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/flow.v1.FlowService/CreateProject" => {
+                    #[allow(non_camel_case_types)]
+                    struct CreateProjectSvc<T: FlowService>(pub Arc<T>);
+                    impl<
+                        T: FlowService,
+                    > tonic::server::UnaryService<super::CreateProjectRequest>
+                    for CreateProjectSvc<T> {
+                        type Response = super::CreateProjectResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CreateProjectRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as FlowService>::create_project(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = CreateProjectSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/flow.v1.FlowService/UpdateProject" => {
+                    #[allow(non_camel_case_types)]
+                    struct UpdateProjectSvc<T: FlowService>(pub Arc<T>);
+                    impl<
+                        T: FlowService,
+                    > tonic::server::UnaryService<super::UpdateProjectRequest>
+                    for UpdateProjectSvc<T> {
+                        type Response = super::UpdateProjectResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::UpdateProjectRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as FlowService>::update_project(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = UpdateProjectSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/flow.v1.FlowService/ArchiveProject" => {
+                    #[allow(non_camel_case_types)]
+                    struct ArchiveProjectSvc<T: FlowService>(pub Arc<T>);
+                    impl<
+                        T: FlowService,
+                    > tonic::server::UnaryService<super::ArchiveProjectRequest>
+                    for ArchiveProjectSvc<T> {
+                        type Response = super::ArchiveProjectResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ArchiveProjectRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as FlowService>::archive_project(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = ArchiveProjectSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

@@ -128,7 +128,9 @@
       {/if}
 
       <div class="actions">
-        <span class="fine">Undoable for 30s</span>
+        {#if demoting && droppedSteps}
+          <span class="fine warn">Dropped steps can't be recovered.</span>
+        {/if}
         <span class="spacer"></span>
         <button class="ghost" onclick={() => (app.dialog = null)}>Cancel</button>
         <button
@@ -264,6 +266,9 @@
     font-size: 11.5px;
     line-height: 1.45;
     color: var(--fg3);
+  }
+  .fine.warn {
+    color: var(--hue-ui);
   }
   .actions {
     display: flex;

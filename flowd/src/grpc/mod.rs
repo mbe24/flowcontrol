@@ -10,9 +10,36 @@ pub struct FlowServiceServer {
     store: DynStore,
 }
 
-/// Convert a boxed store error into a tonic Status.
+/// Convert a boxed store error into a tonic Status, mapping known store/trigger
+/// messages to codes so clients (and the agent-facing MCP) can tell "don't retry"
+/// (InvalidArgument / FailedPrecondition) from "not found" and transient Internal.
 fn into_status(e: Box<dyn std::error::Error + Send + Sync>) -> tonic::Status {
-    tonic::Status::internal(e.to_string())
+    let msg = e.to_string();
+    let m = msg.to_lowercase();
+    if m.contains("not found") {
+        tonic::Status::not_found(msg)
+    } else if m.contains("update_mask cannot be empty")
+        || m.contains("unknown update_mask")
+        || m.contains("requires a target kind")
+        || m.contains("invalid agent result")
+        || m.contains("syntax error") // malformed FTS query from Search
+        || m.contains("fts5")
+    {
+        tonic::Status::invalid_argument(msg)
+    } else if m.contains("invalid parent kind")
+        || m.contains("cross-project")
+        || m.contains("children invalid")
+        || m.contains("its own parent")
+        || m.contains("would create a cycle")
+        || m.contains("has dependents")
+        || m.contains("work package") // "cannot promote or demote a work package"
+        || m.contains("cannot demote")
+        || m.contains("cannot undo")
+    {
+        tonic::Status::failed_precondition(msg)
+    } else {
+        tonic::Status::internal(msg)
+    }
 }
 
 impl FlowServiceServer {
@@ -35,7 +62,7 @@ impl FlowService for FlowServiceServer {
             .store
             .list_projects(req.include_archived)
             .await
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(into_status)?;
         Ok(tonic::Response::new(pb::ListProjectsResponse { projects }))
     }
 
@@ -48,7 +75,7 @@ impl FlowService for FlowServiceServer {
             .get_snapshot(&req.project_id)
             .await
             .map(tonic::Response::new)
-            .map_err(|e| tonic::Status::internal(e.to_string()))
+            .map_err(into_status)
     }
 
     async fn list_events(
@@ -56,15 +83,12 @@ impl FlowService for FlowServiceServer {
         request: tonic::Request<pb::ListEventsRequest>,
     ) -> Result<tonic::Response<pb::ListEventsResponse>, tonic::Status> {
         let req = request.into_inner();
-        let events = self
+        let (events, has_more) = self
             .store
-            .list_events(&req.project_id, req.limit)
+            .list_events(&req.project_id, &req.node_id, req.before_seq, req.limit)
             .await
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
-        Ok(tonic::Response::new(pb::ListEventsResponse {
-            events,
-            has_more: false,
-        }))
+            .map_err(into_status)?;
+        Ok(tonic::Response::new(pb::ListEventsResponse { events, has_more }))
     }
 
     async fn search(
@@ -76,8 +100,20 @@ impl FlowService for FlowServiceServer {
             .store
             .search(&req.project_id, &req.query, req.limit)
             .await
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(into_status)?;
         Ok(tonic::Response::new(pb::SearchResponse { nodes }))
+    }
+
+    async fn poll_changes(
+        &self,
+        request: tonic::Request<pb::PollChangesRequest>,
+    ) -> Result<tonic::Response<pb::PollChangesResponse>, tonic::Status> {
+        let req = request.into_inner();
+        self.store
+            .poll_changes(&req.project_id, req.after_seq, req.limit)
+            .await
+            .map(tonic::Response::new)
+            .map_err(into_status)
     }
 
     async fn watch(
@@ -100,14 +136,11 @@ impl FlowService for FlowServiceServer {
             // Replay anything the client missed since its last seq.
             if from_seq > 0 {
                 if let Ok(events) = store.events_after(&project_id, from_seq).await {
-                    // Contiguous log: ask for a resync only when the window is
-                    // unrealistic or the first event is not directly after the
-                    // requested cursor.
-                    let resync = (!events.is_empty() && events.len() > REPLAY_LIMIT)
-                        || events
-                            .first()
-                            .map(|e| e.seq != from_seq + 1)
-                            .unwrap_or(false);
+                    // `seq` is global but `events` is per-project, so contiguity
+                    // (seq == from_seq + 1) does NOT hold — other projects advance
+                    // seq between this project's events. Resync only when the gap
+                    // exceeds retention.
+                    let resync = events.len() > REPLAY_LIMIT;
                     if !events.is_empty() {
                         let seq = events.last().map(|e| e.seq).unwrap_or(from_seq);
                         let _ = tx
@@ -300,5 +333,49 @@ impl FlowService for FlowServiceServer {
         let req = request.into_inner();
         let m = self.store.undo(req).await.map_err(into_status)?;
         Ok(tonic::Response::new(pb::UndoResponse { mutation: Some(m) }))
+    }
+
+    async fn move_node(
+        &self,
+        request: tonic::Request<pb::MoveNodeRequest>,
+    ) -> Result<tonic::Response<pb::MoveNodeResponse>, tonic::Status> {
+        let req = request.into_inner();
+        let m = self.store.move_node(req).await.map_err(into_status)?;
+        Ok(tonic::Response::new(pb::MoveNodeResponse {
+            mutation: Some(m),
+        }))
+    }
+
+    async fn create_project(
+        &self,
+        request: tonic::Request<pb::CreateProjectRequest>,
+    ) -> Result<tonic::Response<pb::CreateProjectResponse>, tonic::Status> {
+        let req = request.into_inner();
+        let p = self.store.create_project(req).await.map_err(into_status)?;
+        Ok(tonic::Response::new(pb::CreateProjectResponse {
+            project: Some(p),
+        }))
+    }
+
+    async fn update_project(
+        &self,
+        request: tonic::Request<pb::UpdateProjectRequest>,
+    ) -> Result<tonic::Response<pb::UpdateProjectResponse>, tonic::Status> {
+        let req = request.into_inner();
+        let p = self.store.update_project(req).await.map_err(into_status)?;
+        Ok(tonic::Response::new(pb::UpdateProjectResponse {
+            project: Some(p),
+        }))
+    }
+
+    async fn archive_project(
+        &self,
+        request: tonic::Request<pb::ArchiveProjectRequest>,
+    ) -> Result<tonic::Response<pb::ArchiveProjectResponse>, tonic::Status> {
+        let req = request.into_inner();
+        let p = self.store.archive_project(req).await.map_err(into_status)?;
+        Ok(tonic::Response::new(pb::ArchiveProjectResponse {
+            project: Some(p),
+        }))
     }
 }

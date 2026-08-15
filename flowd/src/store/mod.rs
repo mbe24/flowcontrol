@@ -26,11 +26,16 @@ pub trait Store: Send + Sync {
         &self,
         project_id: &str,
     ) -> Result<pb::GetSnapshotResponse, Box<dyn std::error::Error + Send + Sync>>;
+    /// Page the event log backwards (newest first), optionally filtered to one
+    /// node, from before `before_seq` (0 = newest). Returns the page plus whether
+    /// an older page exists.
     async fn list_events(
         &self,
         project_id: &str,
+        node_id: &str,
+        before_seq: i64,
         limit: i32,
-    ) -> Result<Vec<pb::Event>, Box<dyn std::error::Error + Send + Sync>>;
+    ) -> Result<(Vec<pb::Event>, bool), Box<dyn std::error::Error + Send + Sync>>;
     async fn search(
         &self,
         project_id: &str,
@@ -43,6 +48,14 @@ pub trait Store: Send + Sync {
         project_id: &str,
         from_seq: i64,
     ) -> Result<Vec<pb::Event>, Box<dyn std::error::Error + Send + Sync>>;
+    /// Forward poll: events after a cursor plus the next cursor. The stateless
+    /// substitute for Watch (unary, oldest-first).
+    async fn poll_changes(
+        &self,
+        project_id: &str,
+        after_seq: i64,
+        limit: i32,
+    ) -> Result<pb::PollChangesResponse, Box<dyn std::error::Error + Send + Sync>>;
 
     // Writes (each returns the mutation payload + new seq and logs an event)
     async fn create_node(
@@ -85,6 +98,28 @@ pub trait Store: Send + Sync {
         &self,
         req: pb::UndoRequest,
     ) -> Result<pb::Mutation, Box<dyn std::error::Error + Send + Sync>>;
+    /// Reparent / change the kind of a node. A node activity, so it returns a
+    /// `Mutation` and logs a `NODE_UPDATED` event (plus `NODE_DELETED` for any
+    /// step children dropped by a TASK→STEP demote).
+    async fn move_node(
+        &self,
+        req: pb::MoveNodeRequest,
+    ) -> Result<pb::Mutation, Box<dyn std::error::Error + Send + Sync>>;
+
+    // Project lifecycle. Projects are a namespace: these log no event and return
+    // the affected `Project` rather than a `Mutation`.
+    async fn create_project(
+        &self,
+        req: pb::CreateProjectRequest,
+    ) -> Result<pb::Project, Box<dyn std::error::Error + Send + Sync>>;
+    async fn update_project(
+        &self,
+        req: pb::UpdateProjectRequest,
+    ) -> Result<pb::Project, Box<dyn std::error::Error + Send + Sync>>;
+    async fn archive_project(
+        &self,
+        req: pb::ArchiveProjectRequest,
+    ) -> Result<pb::Project, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Subscribe to mutation notifications for Watch.
     fn subscribe(&self) -> broadcast::Receiver<Notified>;

@@ -48,7 +48,21 @@ func (g *GRPC) Projects(ctx context.Context) ([]Project, error) {
 	}
 	out := make([]Project, 0, len(res.Projects))
 	for _, p := range res.Projects {
-		out = append(out, Project{ID: p.Id, Name: p.Name, Description: p.Description})
+		proj := Project{ID: p.Id, Name: p.Name, Description: p.Description}
+		// ListProjects carries no rollup, so fold the per-work-package Progress
+		// the engine computes in GetSnapshot into a project-level done/total —
+		// otherwise the landing shows 0/0. One snapshot per project is fine for
+		// the landing list (small, shown once). Fetched directly rather than via
+		// g.snapshot so listing never evicts the open board's cached snapshot.
+		snap, err := g.c.GetSnapshot(ctx, &flowv1.GetSnapshotRequest{ProjectId: p.Id})
+		if err != nil {
+			return nil, err
+		}
+		for _, pr := range snap.Progress {
+			proj.Progress.Done += int(pr.Done)
+			proj.Progress.Total += int(pr.Total)
+		}
+		out = append(out, proj)
 	}
 	return out, nil
 }
@@ -159,8 +173,24 @@ func (g *GRPC) AddComment(ctx context.Context, nodeID, text string) error {
 	return err
 }
 
-func (g *GRPC) CreateProject(_ context.Context, name, description string, _ bool) (string, error) {
-	return "", fmt.Errorf("CreateProject: flowd proto has no CreateProject RPC yet")
+func (g *GRPC) CreateProject(ctx context.Context, name, description string, seed bool) (string, error) {
+	res, err := g.c.CreateProject(ctx, &flowv1.CreateProjectRequest{
+		Meta:        &flowv1.WriteMeta{Author: g.who},
+		Name:        name,
+		Description: description,
+	})
+	if err != nil {
+		return "", err
+	}
+	g.invalidate()
+	id := res.GetProject().GetId()
+	// Seeding is client-side composition: create the project's first work package.
+	if id != "" && seed {
+		if _, err := g.CreateNode(ctx, NewNode{ProjectID: id, Type: WorkPackage, Title: name}); err != nil {
+			return id, err
+		}
+	}
+	return id, nil
 }
 
 func (g *GRPC) CreateNode(ctx context.Context, n NewNode) (string, error) {
@@ -262,6 +292,7 @@ func fromProtoNode(n *flowv1.Node) Node {
 		Description:  splitParagraphs(n.Description),
 		Status:       fromEffective(n.Status),
 		Condition:    n.Condition,
+		Note:         n.Note,
 		State:        fromWPState(n.WpState),
 		Verification: fromVerification(n.Verification),
 	}

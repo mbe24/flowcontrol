@@ -289,6 +289,7 @@ export class MemoryStore implements FlowStore {
       description: input.description ?? [],
       status: input.type === 'WORK_PACKAGE' ? 'READY' : 'READY',
       condition: input.condition ?? '',
+      note: input.type === 'STEP' ? input.note ?? '' : undefined,
       state: input.type === 'WORK_PACKAGE' ? 'PLANNED' : undefined,
       verification: input.type === 'STEP' ? undefined : { ...NO_VERIFICATION }
     };

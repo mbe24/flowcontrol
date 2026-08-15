@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AddCommentRequest, AddCommentResponse, AddDependencyRequest, AddDependencyResponse, CreateNodeRequest, CreateNodeResponse, DeleteNodeRequest, DeleteNodeResponse, GetSnapshotRequest, GetSnapshotResponse, ListEventsRequest, ListEventsResponse, ListProjectsRequest, ListProjectsResponse, RemoveDependencyRequest, RemoveDependencyResponse, ReportConditionRequest, ReportConditionResponse, SearchRequest, SearchResponse, SetStatusRequest, SetStatusResponse, SetVerdictRequest, SetVerdictResponse, UndoRequest, UndoResponse, UpdateNodeRequest, UpdateNodeResponse, WatchRequest, WatchResponse } from "./flow_pb.js";
+import { AddCommentRequest, AddCommentResponse, AddDependencyRequest, AddDependencyResponse, ArchiveProjectRequest, ArchiveProjectResponse, CreateNodeRequest, CreateNodeResponse, CreateProjectRequest, CreateProjectResponse, DeleteNodeRequest, DeleteNodeResponse, GetSnapshotRequest, GetSnapshotResponse, ListEventsRequest, ListEventsResponse, ListProjectsRequest, ListProjectsResponse, MoveNodeRequest, MoveNodeResponse, PollChangesRequest, PollChangesResponse, RemoveDependencyRequest, RemoveDependencyResponse, ReportConditionRequest, ReportConditionResponse, SearchRequest, SearchResponse, SetStatusRequest, SetStatusResponse, SetVerdictRequest, SetVerdictResponse, UndoRequest, UndoResponse, UpdateNodeRequest, UpdateNodeResponse, UpdateProjectRequest, UpdateProjectResponse, WatchRequest, WatchResponse } from "./flow_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -56,6 +56,17 @@ export const FlowService = {
       name: "Search",
       I: SearchRequest,
       O: SearchResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Unary forward poll of the event log — the stateless substitute for Watch.
+     *
+     * @generated from rpc flow.v1.FlowService.PollChanges
+     */
+    pollChanges: {
+      name: "PollChanges",
+      I: PollChangesRequest,
+      O: PollChangesResponse,
       kind: MethodKind.Unary,
     },
     /**
@@ -177,6 +188,50 @@ export const FlowService = {
       name: "Undo",
       I: UndoRequest,
       O: UndoResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Moves a node to a new parent and/or changes its kind.
+     *
+     * @generated from rpc flow.v1.FlowService.MoveNode
+     */
+    moveNode: {
+      name: "MoveNode",
+      I: MoveNodeRequest,
+      O: MoveNodeResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Creates a project (namespace op; returns the created Project).
+     *
+     * @generated from rpc flow.v1.FlowService.CreateProject
+     */
+    createProject: {
+      name: "CreateProject",
+      I: CreateProjectRequest,
+      O: CreateProjectResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Edits a project's name/description.
+     *
+     * @generated from rpc flow.v1.FlowService.UpdateProject
+     */
+    updateProject: {
+      name: "UpdateProject",
+      I: UpdateProjectRequest,
+      O: UpdateProjectResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Archives or un-archives a project.
+     *
+     * @generated from rpc flow.v1.FlowService.ArchiveProject
+     */
+    archiveProject: {
+      name: "ArchiveProject",
+      I: ArchiveProjectRequest,
+      O: ArchiveProjectResponse,
       kind: MethodKind.Unary,
     },
   }

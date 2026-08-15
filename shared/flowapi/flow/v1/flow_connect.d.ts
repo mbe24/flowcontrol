@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AddCommentRequest, AddCommentResponse, AddDependencyRequest, AddDependencyResponse, CreateNodeRequest, CreateNodeResponse, DeleteNodeRequest, DeleteNodeResponse, GetSnapshotRequest, GetSnapshotResponse, ListEventsRequest, ListEventsResponse, ListProjectsRequest, ListProjectsResponse, RemoveDependencyRequest, RemoveDependencyResponse, ReportConditionRequest, ReportConditionResponse, SearchRequest, SearchResponse, SetStatusRequest, SetStatusResponse, SetVerdictRequest, SetVerdictResponse, UndoRequest, UndoResponse, UpdateNodeRequest, UpdateNodeResponse, WatchRequest, WatchResponse } from "./flow_pb.js";
+import { AddCommentRequest, AddCommentResponse, AddDependencyRequest, AddDependencyResponse, ArchiveProjectRequest, ArchiveProjectResponse, CreateNodeRequest, CreateNodeResponse, CreateProjectRequest, CreateProjectResponse, DeleteNodeRequest, DeleteNodeResponse, GetSnapshotRequest, GetSnapshotResponse, ListEventsRequest, ListEventsResponse, ListProjectsRequest, ListProjectsResponse, MoveNodeRequest, MoveNodeResponse, PollChangesRequest, PollChangesResponse, RemoveDependencyRequest, RemoveDependencyResponse, ReportConditionRequest, ReportConditionResponse, SearchRequest, SearchResponse, SetStatusRequest, SetStatusResponse, SetVerdictRequest, SetVerdictResponse, UndoRequest, UndoResponse, UpdateNodeRequest, UpdateNodeResponse, UpdateProjectRequest, UpdateProjectResponse, WatchRequest, WatchResponse } from "./flow_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -56,6 +56,17 @@ export declare const FlowService: {
       readonly name: "Search",
       readonly I: typeof SearchRequest,
       readonly O: typeof SearchResponse,
+      readonly kind: MethodKind.Unary,
+    },
+    /**
+     * Unary forward poll of the event log — the stateless substitute for Watch.
+     *
+     * @generated from rpc flow.v1.FlowService.PollChanges
+     */
+    readonly pollChanges: {
+      readonly name: "PollChanges",
+      readonly I: typeof PollChangesRequest,
+      readonly O: typeof PollChangesResponse,
       readonly kind: MethodKind.Unary,
     },
     /**
@@ -177,6 +188,50 @@ export declare const FlowService: {
       readonly name: "Undo",
       readonly I: typeof UndoRequest,
       readonly O: typeof UndoResponse,
+      readonly kind: MethodKind.Unary,
+    },
+    /**
+     * Moves a node to a new parent and/or changes its kind.
+     *
+     * @generated from rpc flow.v1.FlowService.MoveNode
+     */
+    readonly moveNode: {
+      readonly name: "MoveNode",
+      readonly I: typeof MoveNodeRequest,
+      readonly O: typeof MoveNodeResponse,
+      readonly kind: MethodKind.Unary,
+    },
+    /**
+     * Creates a project (namespace op; returns the created Project).
+     *
+     * @generated from rpc flow.v1.FlowService.CreateProject
+     */
+    readonly createProject: {
+      readonly name: "CreateProject",
+      readonly I: typeof CreateProjectRequest,
+      readonly O: typeof CreateProjectResponse,
+      readonly kind: MethodKind.Unary,
+    },
+    /**
+     * Edits a project's name/description.
+     *
+     * @generated from rpc flow.v1.FlowService.UpdateProject
+     */
+    readonly updateProject: {
+      readonly name: "UpdateProject",
+      readonly I: typeof UpdateProjectRequest,
+      readonly O: typeof UpdateProjectResponse,
+      readonly kind: MethodKind.Unary,
+    },
+    /**
+     * Archives or un-archives a project.
+     *
+     * @generated from rpc flow.v1.FlowService.ArchiveProject
+     */
+    readonly archiveProject: {
+      readonly name: "ArchiveProject",
+      readonly I: typeof ArchiveProjectRequest,
+      readonly O: typeof ArchiveProjectResponse,
       readonly kind: MethodKind.Unary,
     },
   }

@@ -19,6 +19,7 @@
   let title = $state(initialTitle);
   let description = $state('');
   let condition = $state('');
+  let note = $state('');
   // svelte-ignore state_referenced_locally
   let another = $state(initialTitle.length > 0);
   let busy = $state(false);
@@ -69,12 +70,14 @@
         type: kind,
         title: title.trim(),
         description: description.trim() ? description.trim().split(/\n{2,}/) : [],
-        condition: condition.trim()
+        condition: condition.trim(),
+        note: kind === 'STEP' ? note.trim() : undefined
       });
       if (another) {
         title = '';
         description = '';
         condition = '';
+        note = '';
         titleEl?.focus();
       } else {
         app.dialog = null;
@@ -193,6 +196,13 @@
       </div>
       <input class="mono" bind:value={condition} placeholder="pnpm test:auth --grep rotate" />
     </div>
+
+    {#if kind === 'STEP'}
+      <div class="field">
+        <div class="labelrow"><span class="label">Note</span><span class="opt">optional · the step's detail, shown on expand</span></div>
+        <textarea bind:value={note} rows="2" placeholder="A sentence or two of how-to."></textarea>
+      </div>
+    {/if}
 
     <div class="actions">
       <label class="another">

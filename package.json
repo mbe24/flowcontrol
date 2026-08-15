@@ -7,5 +7,14 @@
     "flowui",
     "flowmcp",
     "shared/flowapi"
-  ]
+  ],
+  "scripts": {
+    "test:flowd": "node scripts/runner.mjs test:flowd",
+    "build:flowd": "node scripts/runner.mjs build:flowd",
+    "check:flowd": "node scripts/runner.mjs check:flowd",
+    "dev:mcp": "npm run dev -w flowmcp",
+    "test:mcp": "npm run test -w flowmcp",
+    "typecheck:mcp": "npm run typecheck -w flowmcp",
+    "test:flowcli": "node scripts/runner.mjs test:flowcli"
+  }
 }

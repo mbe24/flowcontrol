@@ -18,8 +18,10 @@ import type {
 import {
   AddCommentRequestSchema,
   AddDependencyRequestSchema,
+  ArchiveProjectRequestSchema,
   AgentResult as PbAgentResult,
   CreateNodeRequestSchema,
+  CreateProjectRequestSchema,
   DeclaredStatus as PbDeclared,
   DeleteNodeRequestSchema,
   EffectiveStatus as PbEffective,
@@ -28,11 +30,13 @@ import {
   GetSnapshotRequestSchema,
   HumanVerdict as PbVerdict,
   ListProjectsRequestSchema,
+  MoveNodeRequestSchema,
   NodeKind as PbKind,
   RemoveDependencyRequestSchema,
   SetStatusRequestSchema,
   SetVerdictRequestSchema,
   UpdateNodeRequestSchema,
+  UpdateProjectRequestSchema,
   WorkPackageState as PbWpState,
   type Dependency as PbDependency,
   type Event as PbEvent,
@@ -176,7 +180,13 @@ function verificationOf(v: PbNode['verification']): Verification | undefined {
 // ── proto → UI mapping (pure, unit-testable) ────────────────────────────────
 
 export function mapProject(p: PbProject): Project {
-  return { id: p.id, name: p.name, description: p.description, createdAt: Number(p.createdAt) };
+  return {
+    id: p.id,
+    name: p.name,
+    description: p.description,
+    createdAt: Number(p.createdAt),
+    archived: Number(p.archivedAt) !== 0
+  };
 }
 
 export function mapNode(n: PbNode): FlowNode {
@@ -190,6 +200,7 @@ export function mapNode(n: PbNode): FlowNode {
     status: statusOf(n.status)
   };
   if (n.condition) node.condition = n.condition;
+  if (n.note) node.note = n.note;
   if (n.kind === PbKind.WORK_PACKAGE && n.wpState) node.state = wpStateOf(n.wpState);
   const v = verificationOf(n.verification);
   if (v) node.verification = v;
@@ -241,12 +252,16 @@ type FlowServiceShim = Pick<
   | 'deleteNode'
   | 'addDependency'
   | 'removeDependency'
+  | 'moveNode'
+  | 'createProject'
+  | 'updateProject'
+  | 'archiveProject'
 >;
 
 /**
- * FlowStore backed by the FlowControl core over grpc-web. Methods this flowd
- * version cannot serve yet (moveNode, project CRUD) are no-ops until the proto
- * is extended in concert with flowcli — see plan/migration.svelte.md.
+ * FlowStore backed by the FlowControl core over grpc-web. Every method maps to a
+ * FlowService RPC — project lifecycle (create/update/archive) and moveNode
+ * included; `note` round-trips on read and update.
  */
 export class RemoteStore implements FlowStore {
   private client: FlowServiceShim;
@@ -309,6 +324,7 @@ export class RemoteStore implements FlowStore {
         title: input.title,
         description: (input.description ?? []).join('\n\n'),
         condition: input.condition ?? '',
+        note: input.note ?? '',
         position: 0,
         reference: ''
       })
@@ -317,7 +333,6 @@ export class RemoteStore implements FlowStore {
   }
 
   async updateNode(nodeId: string, patch: NodePatch): Promise<void> {
-    // note is a step body field this flowd version can't store yet — skipped.
     const updateMask: string[] = [];
     const body: Record<string, unknown> = { meta: meta(), nodeId };
     if (patch.title !== undefined) {
@@ -332,6 +347,10 @@ export class RemoteStore implements FlowStore {
       updateMask.push('condition');
       body.condition = patch.condition;
     }
+    if (patch.note !== undefined) {
+      updateMask.push('note');
+      body.note = patch.note;
+    }
     if (updateMask.length === 0) return;
     await this.client.updateNode(create(UpdateNodeRequestSchema, { ...body, updateMask }));
   }
@@ -340,8 +359,10 @@ export class RemoteStore implements FlowStore {
     await this.client.deleteNode(create(DeleteNodeRequestSchema, { meta: meta(), nodeId, failIfReferenced: false }));
   }
 
-  async moveNode(_nodeId: string, _newParentId: string, _newType: NodeType): Promise<void> {
-    console.warn('[flowui] moveNode is a no-op until the proto/flowd change for reparenting lands');
+  async moveNode(nodeId: string, newParentId: string, newType: NodeType): Promise<void> {
+    await this.client.moveNode(
+      create(MoveNodeRequestSchema, { meta: meta(), nodeId, parentId: newParentId, kind: kindFor(newType) })
+    );
   }
 
   async addDependency(blockerId: string, blockedId: string): Promise<void> {
@@ -352,16 +373,32 @@ export class RemoteStore implements FlowStore {
     await this.client.removeDependency(create(RemoveDependencyRequestSchema, { meta: meta(), blockerId, blockedId }));
   }
 
-  async createProject(_name: string, _description: string, _seedWorkPackage: boolean): Promise<string> {
-    console.warn('[flowui] createProject is a no-op until CreateProject lands in the proto');
-    return '';
+  async createProject(name: string, description: string, seedWorkPackage: boolean): Promise<string> {
+    const res = await this.client.createProject(create(CreateProjectRequestSchema, { meta: meta(), name, description }));
+    const id = res.project?.id ?? '';
+    // Seeding is client-side composition: create the project, then its first WP.
+    if (id && seedWorkPackage) {
+      await this.createNode({ projectId: id, parentId: null, type: 'WORK_PACKAGE', title: name });
+    }
+    return id;
   }
 
-  async updateProject(_projectId: string, _patch: { name?: string; description?: string }): Promise<void> {
-    console.warn('[flowui] updateProject is a no-op until UpdateProject lands in the proto');
+  async updateProject(projectId: string, patch: { name?: string; description?: string }): Promise<void> {
+    const updateMask: string[] = [];
+    const body: Record<string, unknown> = { meta: meta(), projectId };
+    if (patch.name !== undefined) {
+      updateMask.push('name');
+      body.name = patch.name;
+    }
+    if (patch.description !== undefined) {
+      updateMask.push('description');
+      body.description = patch.description;
+    }
+    if (updateMask.length === 0) return;
+    await this.client.updateProject(create(UpdateProjectRequestSchema, { ...body, updateMask }));
   }
 
-  async archiveProject(_projectId: string, _archived: boolean): Promise<void> {
-    console.warn('[flowui] archiveProject is a no-op until ArchiveProject lands in the proto');
+  async archiveProject(projectId: string, archived: boolean): Promise<void> {
+    await this.client.archiveProject(create(ArchiveProjectRequestSchema, { meta: meta(), projectId, archived }));
   }
 }

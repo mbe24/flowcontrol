@@ -177,7 +177,7 @@ func TestGRPCReadsSnapshot(t *testing.T) {
 	snap := &flowv1.GetSnapshotResponse{
 		Nodes: []*flowv1.Node{
 			{Id: "T-1042", ProjectId: "prj-travel", Kind: flowv1.NodeKind_NODE_KIND_TASK, Title: "Device-code",
-				Status: flowv1.EffectiveStatus_EFFECTIVE_STATUS_READY, Condition: "pnpm test:auth"},
+				Status: flowv1.EffectiveStatus_EFFECTIVE_STATUS_READY, Condition: "pnpm test:auth", Note: "check the RFC"},
 		},
 		Dependencies: []*flowv1.Dependency{{BlockerId: "T-1041", BlockedId: "T-1042"}},
 	}
@@ -189,11 +189,40 @@ func TestGRPCReadsSnapshot(t *testing.T) {
 	assert.Equal(t, "T-1042", nodes[0].ID)
 	assert.Equal(t, Task, nodes[0].Type)
 	assert.Equal(t, Ready, nodes[0].Status)
+	assert.Equal(t, "check the RFC", nodes[0].Note)
 
 	deps, err := g.Dependencies(context.Background(), "prj-travel")
 	require.NoError(t, err)
 	require.Len(t, deps, 1)
 	assert.Equal(t, "T-1041", deps[0].BlockerID)
+	mc.AssertExpectations(t)
+}
+
+// Projects() folds the engine's per-work-package Progress into a project-level
+// done/total, so the landing shows real numbers instead of 0/0.
+func TestGRPCProjectsRollUpProgress(t *testing.T) {
+	mc := new(mockClient)
+	g := NewGRPCWithClient(mc, "mbe")
+
+	mc.On("ListProjects", mock.Anything, mock.Anything).
+		Return(&flowv1.ListProjectsResponse{
+			Projects: []*flowv1.Project{{Id: "prj-travel", Name: "Travel"}},
+		}, nil).Once()
+	// Two work packages: 3/5 and 2/2 leaves done → project totals 5/7.
+	mc.On("GetSnapshot", mock.Anything, &flowv1.GetSnapshotRequest{ProjectId: "prj-travel"}).
+		Return(&flowv1.GetSnapshotResponse{
+			Progress: []*flowv1.Progress{
+				{WorkPackageId: "WP-AUTH", Total: 5, Done: 3},
+				{WorkPackageId: "WP-PAY", Total: 2, Done: 2},
+			},
+		}, nil).Once()
+
+	ps, err := g.Projects(context.Background())
+	require.NoError(t, err)
+	require.Len(t, ps, 1)
+	assert.Equal(t, "Travel", ps[0].Name)
+	assert.Equal(t, 5, ps[0].Progress.Done)
+	assert.Equal(t, 7, ps[0].Progress.Total)
 	mc.AssertExpectations(t)
 }
 
@@ -225,12 +254,26 @@ func TestGRPCCreateNodeRPC(t *testing.T) {
 	mc.AssertExpectations(t)
 }
 
-func TestGRPCCreateProjectUnsupported(t *testing.T) {
+func TestGRPCCreateProject(t *testing.T) {
 	mc := new(mockClient)
 	g := NewGRPCWithClient(mc, "mbe")
 
-	_, err := g.CreateProject(context.Background(), "New App", "desc", true)
-	require.Error(t, err)
+	mc.On("CreateProject", mock.Anything, mock.MatchedBy(func(req *flowv1.CreateProjectRequest) bool {
+		return req.Name == "New App" && req.Description == "desc" &&
+			req.Meta != nil && req.Meta.Author == "mbe"
+	})).Return(&flowv1.CreateProjectResponse{Project: &flowv1.Project{Id: "prj-new"}}, nil).Once()
+
+	// seed=true → a follow-up CreateNode(WORK_PACKAGE) under the new project.
+	mc.On("CreateNode", mock.Anything, mock.MatchedBy(func(req *flowv1.CreateNodeRequest) bool {
+		return req.ProjectId == "prj-new" && req.Kind == flowv1.NodeKind_NODE_KIND_WORK_PACKAGE
+	})).Return(&flowv1.CreateNodeResponse{
+		Mutation: &flowv1.Mutation{ChangedNodes: []*flowv1.Node{{Id: "WP-1"}}},
+	}, nil).Once()
+
+	id, err := g.CreateProject(context.Background(), "New App", "desc", true)
+	require.NoError(t, err)
+	assert.Equal(t, "prj-new", id)
+	mc.AssertExpectations(t)
 }
 
 // --- UpdateNode RPC ----------------------------------------------------------

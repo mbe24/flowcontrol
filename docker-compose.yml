@@ -42,8 +42,26 @@ services:
       CARGO_TARGET_DIR: /tmp/target
       RUST_LOG: info
 
+  # One-shot Go runner for flowcli tests. The host blocks executing freshly built
+  # test binaries; a container's own execution isn't. `profiles` keeps it out of
+  # `docker compose up`. Run: `docker compose run --rm flowcli-test go test ./...`.
+  flowcli-test:
+    image: golang:1.26
+    profiles: ["tools"]
+    working_dir: /work/flowcli
+    volumes:
+      - type: bind
+        source: .
+        target: /work
+      - flowcli-go-mod:/go/pkg/mod
+      - flowcli-go-build:/root/.cache/go-build
+
 volumes:
   flowd-cargo:
     name: flowd-cargo
   flowd-target:
     name: flowd-target
+  flowcli-go-mod:
+    name: flowcli-go-mod
+  flowcli-go-build:
+    name: flowcli-go-build

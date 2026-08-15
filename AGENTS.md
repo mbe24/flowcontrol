@@ -17,6 +17,20 @@ Run quick type checks, format checks, and unit tests after a series of commits
 (see the per-component scripts; the repo is an npm workspace — run npm scripts
 at the repo root with `-w <package>`).
 
+Root test scripts for the compiled components — `npm run test:flowd`,
+`check:flowd`, `build:flowd`, `test:flowcli` — go through `scripts/runner.mjs`,
+which selects native vs Docker by the **`FLOW_RUNNER`** env var:
+
+- `docker` — run in a container (the Windows host blocks executing freshly built
+  binaries).
+- `local` — run the tool natively.
+- `auto` (default) — native on Linux/macOS (incl. **WSL**), Docker on Windows.
+
+So in WSL, `auto` and `local` both stay native; only `FLOW_RUNNER=docker` starts
+Docker. flowui/flowmcp run natively on Node (no Docker). Fuzzers (`cargo fuzz`,
+`go test -fuzz`) are on-demand only and never run in CI; the in-CI property tests
+(proptest/rapid/fast-check) are bounded and fast.
+
 ## DeepSeek
 
 Instructions for working in this, i.e. Codex, harness.

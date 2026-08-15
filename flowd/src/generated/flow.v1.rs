@@ -100,6 +100,10 @@ pub struct Node {
     /// Free-text reference to an external system (e.g. JIRA-123).
     #[prost(string, tag="15")]
     pub reference: ::prost::alloc::string::String,
+    /// STEP body — a few sentences shown on expand. Distinct from `description`
+    /// (task paragraphs). Empty for work packages and tasks.
+    #[prost(string, tag="16")]
+    pub note: ::prost::alloc::string::String,
 }
 /// A directed edge in the dependency DAG: blocker must be done before blocked.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -122,7 +126,7 @@ pub struct Event {
     /// Owning project.
     #[prost(string, tag="2")]
     pub project_id: ::prost::alloc::string::String,
-    /// Affected node; empty for project-level events.
+    /// Affected node; empty for node-less events (e.g. deletes, dependency edges).
     #[prost(string, tag="3")]
     pub node_id: ::prost::alloc::string::String,
     /// What changed.
@@ -211,7 +215,8 @@ pub struct GetSnapshotResponse {
     /// Recent activity only — full history is paged through ListEvents.
     #[prost(message, repeated, tag="5")]
     pub recent_events: ::prost::alloc::vec::Vec<Event>,
-    /// The cursor to resume Watch from. Everything above is consistent as of here.
+    /// Cursor to resume Watch from — treat as OPAQUE (no arithmetic on it).
+    /// Everything above is consistent as of here.
     #[prost(int64, tag="6")]
     pub seq: i64,
 }
@@ -243,7 +248,7 @@ pub struct ListEventsResponse {
     #[prost(bool, tag="2")]
     pub has_more: bool,
 }
-/// Full-text search over node titles and descriptions within a project.
+/// Full-text search over node titles, descriptions and step notes within a project.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SearchRequest {
@@ -264,6 +269,34 @@ pub struct SearchResponse {
     /// Matching nodes.
     #[prost(message, repeated, tag="1")]
     pub nodes: ::prost::alloc::vec::Vec<Node>,
+}
+/// Unary "everything after cursor N" for one project — the stateless poll that a
+/// client (e.g. an MCP agent) uses instead of holding Watch open. Forward-ordered,
+/// unlike ListEvents which pages backwards.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PollChangesRequest {
+    /// The project to poll.
+    #[prost(string, tag="1")]
+    pub project_id: ::prost::alloc::string::String,
+    /// Return events with seq strictly greater than this. 0 = from the beginning.
+    #[prost(int64, tag="2")]
+    pub after_seq: i64,
+    /// Max events to return (0 = server default).
+    #[prost(int32, tag="3")]
+    pub limit: i32,
+}
+/// One forward page of changes.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PollChangesResponse {
+    /// Events after the cursor, oldest first.
+    #[prost(message, repeated, tag="1")]
+    pub events: ::prost::alloc::vec::Vec<Event>,
+    /// The cursor to poll from next: the last returned event's seq, or the request's
+    /// after_seq when nothing new. Treat as opaque.
+    #[prost(int64, tag="2")]
+    pub seq: i64,
 }
 // ─── the push channel ────────────────────────────────────────────────────────
 
@@ -310,7 +343,9 @@ pub struct WatchResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct WriteMeta {
-    /// Plain name of the author (human or agent).
+    /// Display label for activity feeds only. UNTRUSTED, client-supplied; never an
+    /// identity or an authorization input. Verified identity, if ever added, arrives
+    /// via transport auth and a separate SERVER-POPULATED field (see reserved 3).
     #[prost(string, tag="1")]
     pub author: ::prost::alloc::string::String,
     /// Idempotency key; a retried request with the same key writes one event.
@@ -348,6 +383,9 @@ pub struct CreateNodeRequest {
     /// External reference (plain text).
     #[prost(string, tag="9")]
     pub reference: ::prost::alloc::string::String,
+    /// STEP body; lets a step created with a body round-trip.
+    #[prost(string, tag="10")]
+    pub note: ::prost::alloc::string::String,
 }
 /// Edits editable fields of an existing node.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -360,7 +398,7 @@ pub struct UpdateNodeRequest {
     #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
     /// Only the fields named here are written. Allowed: title, description,
-    /// condition, position, wp_state, reference.
+    /// condition, position, wp_state, reference, note.
     #[prost(string, repeated, tag="3")]
     pub update_mask: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// New title, when masked.
@@ -381,6 +419,9 @@ pub struct UpdateNodeRequest {
     /// New external reference, when masked.
     #[prost(string, tag="9")]
     pub reference: ::prost::alloc::string::String,
+    /// New STEP body, when masked.
+    #[prost(string, tag="10")]
+    pub note: ::prost::alloc::string::String,
 }
 /// Deletes a node and its subtree.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -495,9 +536,117 @@ pub struct UndoRequest {
     /// The project the event belongs to.
     #[prost(string, tag="2")]
     pub project_id: ::prost::alloc::string::String,
-    /// The event to reverse; 0 for the most recent.
+    /// The event to reverse; 0 for the most recent. (0 = "most recent" is a
+    /// single-writer convenience; a multi-writer caller such as an agent should pass
+    /// an explicit seq — see the flowmcp tool discipline.)
     #[prost(int64, tag="3")]
     pub seq: i64,
+}
+// ─── project lifecycle (namespace ops: log no event, return the Project) ──────
+
+/// Creates a project. The id is minted by the server and returned on the Project.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateProjectRequest {
+    /// Author (display) + idempotency key. See WriteMeta.
+    #[prost(message, optional, tag="1")]
+    pub meta: ::core::option::Option<WriteMeta>,
+    /// Display name.
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    /// Short goal or context.
+    #[prost(string, tag="3")]
+    pub description: ::prost::alloc::string::String,
+}
+/// Result of creating a project (carries the server-minted id).
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateProjectResponse {
+    /// The created project.
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+}
+/// Edits a project's name and/or description.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateProjectRequest {
+    /// Author + idempotency key.
+    #[prost(message, optional, tag="1")]
+    pub meta: ::core::option::Option<WriteMeta>,
+    /// The project to edit.
+    #[prost(string, tag="2")]
+    pub project_id: ::prost::alloc::string::String,
+    /// Only the fields named here are written. Allowed: name, description.
+    #[prost(string, repeated, tag="3")]
+    pub update_mask: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// New name, when masked.
+    #[prost(string, tag="4")]
+    pub name: ::prost::alloc::string::String,
+    /// New description, when masked.
+    #[prost(string, tag="5")]
+    pub description: ::prost::alloc::string::String,
+}
+/// Result of updating a project.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateProjectResponse {
+    /// The updated project.
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+}
+/// Archives or un-archives a project.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ArchiveProjectRequest {
+    /// Author + idempotency key.
+    #[prost(message, optional, tag="1")]
+    pub meta: ::core::option::Option<WriteMeta>,
+    /// The project to (un)archive.
+    #[prost(string, tag="2")]
+    pub project_id: ::prost::alloc::string::String,
+    /// True sets archived_at to now; false clears it.
+    #[prost(bool, tag="3")]
+    pub archived: bool,
+}
+/// Result of (un)archiving a project.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ArchiveProjectResponse {
+    /// The project after the change.
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+}
+// ─── move (reparent / promote / demote) — node activity, returns a Mutation ───
+
+/// Moves a node to a new parent and/or changes its kind. Scoped to STEP<->TASK
+/// promote/demote and TASK reparent, within a single project; any kind transition
+/// touching WORK_PACKAGE is rejected. A TASK->STEP demote permanently deletes the
+/// task's own steps (destructive, not undoable). The server appends the node to
+/// its new sibling list; a deliberate reorder is a separate UpdateNode(position).
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MoveNodeRequest {
+    /// Author + idempotency key.
+    #[prost(message, optional, tag="1")]
+    pub meta: ::core::option::Option<WriteMeta>,
+    /// The node to move.
+    #[prost(string, tag="2")]
+    pub node_id: ::prost::alloc::string::String,
+    /// The new parent: a WORK_PACKAGE for kind=TASK, a TASK for kind=STEP. The
+    /// project is derived from node_id; there is deliberately no project_id field.
+    #[prost(string, tag="3")]
+    pub parent_id: ::prost::alloc::string::String,
+    /// The node's new kind (promote/demote), or its current kind for a pure reparent.
+    #[prost(enumeration="NodeKind", tag="4")]
+    pub kind: i32,
+}
+/// Result of moving a node.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MoveNodeResponse {
+    /// The mutation payload (moved node + any cascade + deleted-child events).
+    #[prost(message, optional, tag="1")]
+    pub mutation: ::core::option::Option<Mutation>,
 }
 /// The payload of any successful mutation, shared by every mutation RPC so all
 /// of them and the Watch stream use one apply-path.
@@ -604,10 +753,11 @@ pub struct UndoResponse {
 //    * unary  — commands and one-shot reads
 //    * stream — Watch, the single push channel every client holds open
 //
-// Every mutation returns the events it produced, and those same events arrive
-// on Watch. A client can therefore apply its own change optimistically and let
-// the stream reconcile, or ignore the return value and wait for the stream.
-// Both work; neither needs polling.
+// Every node mutation returns the events it produced, and those same events
+// arrive on Watch. A client can therefore apply its own change optimistically and
+// let the stream reconcile, or ignore the return value and wait for the stream.
+// Both work; neither needs polling. (Project lifecycle RPCs are the exception:
+// projects are a namespace, log no events, and return the Project directly.)
 
 // ─── enums ───────────────────────────────────────────────────────────────────
 

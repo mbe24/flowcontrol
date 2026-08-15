@@ -96,3 +96,28 @@ func (m *mockClient) Undo(ctx context.Context, in *flowv1.UndoRequest, opts ...g
 	args := m.Called(ctx, in)
 	return args.Get(0).(*flowv1.UndoResponse), args.Error(1)
 }
+
+func (m *mockClient) MoveNode(ctx context.Context, in *flowv1.MoveNodeRequest, opts ...grpc.CallOption) (*flowv1.MoveNodeResponse, error) {
+	args := m.Called(ctx, in)
+	return args.Get(0).(*flowv1.MoveNodeResponse), args.Error(1)
+}
+
+func (m *mockClient) CreateProject(ctx context.Context, in *flowv1.CreateProjectRequest, opts ...grpc.CallOption) (*flowv1.CreateProjectResponse, error) {
+	args := m.Called(ctx, in)
+	return args.Get(0).(*flowv1.CreateProjectResponse), args.Error(1)
+}
+
+func (m *mockClient) UpdateProject(ctx context.Context, in *flowv1.UpdateProjectRequest, opts ...grpc.CallOption) (*flowv1.UpdateProjectResponse, error) {
+	args := m.Called(ctx, in)
+	return args.Get(0).(*flowv1.UpdateProjectResponse), args.Error(1)
+}
+
+func (m *mockClient) ArchiveProject(ctx context.Context, in *flowv1.ArchiveProjectRequest, opts ...grpc.CallOption) (*flowv1.ArchiveProjectResponse, error) {
+	args := m.Called(ctx, in)
+	return args.Get(0).(*flowv1.ArchiveProjectResponse), args.Error(1)
+}
+
+func (m *mockClient) PollChanges(ctx context.Context, in *flowv1.PollChangesRequest, opts ...grpc.CallOption) (*flowv1.PollChangesResponse, error) {
+	args := m.Called(ctx, in)
+	return args.Get(0).(*flowv1.PollChangesResponse), args.Error(1)
+}

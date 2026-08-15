@@ -3,9 +3,9 @@
 -- Why SQLite and plain SQL rather than an ORM: the interesting queries here are
 -- recursive graph walks (critical path, hops-from-ready, cycle detection).
 -- Diesel and SeaORM both make you drop to raw SQL for those, so the ORM buys
--- nothing but a second place for the schema to live. sqlx checks these queries
--- against the real database at compile time, which is the guarantee you
--- actually wanted from an ORM.
+-- nothing but a second place for the schema to live. (flowd uses runtime-checked
+-- sqlx::query — no compile-time query macros, no .sqlx offline cache — so this
+-- schema file is the single source of truth for the store.)
 --
 --   sqlx migrate add -r initial_schema
 --   sqlx migrate run
@@ -56,6 +56,9 @@ CREATE TABLE nodes (
     condition   TEXT NOT NULL DEFAULT '',
     -- External reference (plain text, e.g. JIRA-123 or a URL). Nullable.
     reference   TEXT,
+    -- STEP body — a few sentences, shown on expand. '' for WP/TASK (mirrors
+    -- `description`: "no note" and "empty note" are not a meaningful distinction).
+    note        TEXT NOT NULL DEFAULT '',
 
     -- OPEN is the neutral state; the engine decides READY vs BLOCKED from it.
     declared_status TEXT NOT NULL DEFAULT 'OPEN'
@@ -89,6 +92,39 @@ BEGIN
     SELECT RAISE(ABORT, 'invalid parent kind for node')
     WHERE (SELECT kind FROM nodes WHERE id = NEW.parent_id)
           IS NOT (CASE NEW.kind WHEN 'TASK' THEN 'WORK_PACKAGE' WHEN 'STEP' THEN 'TASK' END);
+END;
+
+-- The UPDATE counterpart, for MoveNode (reparent / kind change). Closes three
+-- holes: (0) a node cannot be its own parent — in a BEFORE UPDATE the parent-kind
+-- subquery reads the pre-update row, so MoveNode(X, parent=X) would otherwise
+-- validate and create a 1-node cycle; (1) parent must be the right kind; (2) no
+-- cross-project reparenting; (3) children must remain valid under the new kind
+-- (runs unconditionally so it also catches a promotion to WORK_PACKAGE that would
+-- strand STEP children). The move handler deletes step children before a demote,
+-- so in the sanctioned path clause 3 sees no child; it is a backstop.
+CREATE TRIGGER nodes_parent_kind_update
+BEFORE UPDATE OF parent_id, kind ON nodes
+BEGIN
+    SELECT RAISE(ABORT, 'node cannot be its own parent')
+    WHERE NEW.parent_id = NEW.id;
+
+    SELECT RAISE(ABORT, 'invalid parent kind for node')
+    WHERE NEW.parent_id IS NOT NULL
+      AND (SELECT kind FROM nodes WHERE id = NEW.parent_id)
+          IS NOT (CASE NEW.kind WHEN 'TASK' THEN 'WORK_PACKAGE' WHEN 'STEP' THEN 'TASK' END);
+
+    SELECT RAISE(ABORT, 'cross-project move')
+    WHERE NEW.parent_id IS NOT NULL
+      AND (SELECT project_id FROM nodes WHERE id = NEW.parent_id) <> NEW.project_id;
+
+    SELECT RAISE(ABORT, 'children invalid for new kind')
+    WHERE EXISTS (
+        SELECT 1 FROM nodes c
+        WHERE c.parent_id = NEW.id
+          AND c.kind IS NOT (CASE NEW.kind WHEN 'WORK_PACKAGE' THEN 'TASK'
+                                           WHEN 'TASK'         THEN 'STEP' END)
+        -- CASE is NULL for NEW.kind='STEP' ⇒ any child trips the guard.
+    );
 END;
 
 CREATE TRIGGER nodes_touch
@@ -177,7 +213,7 @@ END;
 CREATE TABLE events (
     seq        INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    -- Null for project-level events.
+    -- Null for node-less events (e.g. dependency edges, deletes).
     node_id    TEXT REFERENCES nodes(id) ON DELETE CASCADE,
 
     kind       TEXT NOT NULL CHECK (kind IN (
@@ -225,39 +261,11 @@ SELECT
     (SELECT count(*) FROM nodes c WHERE c.parent_id = n.id AND c.declared_status = 'DONE') AS child_done_count
 FROM nodes n;
 
--- Progress per work package, counting leaves (steps where they exist, else the
--- task itself) — the ratio bar in both clients.
-CREATE VIEW wp_progress AS
-WITH leaves AS (
-    SELECT t.parent_id AS wp_id, COALESCE(s.id, t.id) AS leaf_id,
-           COALESCE(s.declared_status, t.declared_status) AS declared,
-           COALESCE(s.id, t.id) AS sid
-    FROM nodes t
-    LEFT JOIN nodes s ON s.parent_id = t.id AND s.kind = 'STEP'
-    WHERE t.kind = 'TASK'
-)
-SELECT
-    wp_id,
-    count(*)                                        AS total,
-    sum(declared = 'DONE')                          AS done,
-    sum(declared = 'DEFERRED')                      AS deferred,
-    sum(declared = 'OPEN')                          AS open_count
-FROM leaves
-GROUP BY wp_id;
-
--- Longest dependency chain ending at each node — "hops from ready" in the TUI's
--- focus view, and the critical path if you take the max.
-CREATE VIEW node_depth AS
-WITH RECURSIVE walk(id, depth) AS (
-    SELECT n.id, 0
-    FROM nodes n
-    WHERE NOT EXISTS (SELECT 1 FROM dependencies d WHERE d.blocked_id = n.id)
-    UNION ALL
-    SELECT d.blocked_id, w.depth + 1
-    FROM dependencies d JOIN walk w ON d.blocker_id = w.id
-    WHERE w.depth < 64
-)
-SELECT id, max(depth) AS depth FROM walk GROUP BY id;
+-- NOTE: the wp_progress and node_depth views were removed here. They were unused
+-- by flowd (progress_for inlines its own query), and wp_progress counted DECLARED
+-- status while the live code counts EFFECTIVE status — a latent trap. Reintroduce
+-- correctly (effective status; wired to a real read) when a query actually needs
+-- them.
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- search — backs the ⌘K palette and the TUI finder
@@ -267,26 +275,27 @@ CREATE VIRTUAL TABLE nodes_fts USING fts5(
     id UNINDEXED,
     title,
     description,
+    note,
     content = 'nodes',
     content_rowid = 'rowid',
     tokenize = 'unicode61'
 );
 
 CREATE TRIGGER nodes_fts_insert AFTER INSERT ON nodes BEGIN
-    INSERT INTO nodes_fts(rowid, id, title, description)
-    VALUES (NEW.rowid, NEW.id, NEW.title, NEW.description);
+    INSERT INTO nodes_fts(rowid, id, title, description, note)
+    VALUES (NEW.rowid, NEW.id, NEW.title, NEW.description, NEW.note);
 END;
 
 CREATE TRIGGER nodes_fts_delete AFTER DELETE ON nodes BEGIN
-    INSERT INTO nodes_fts(nodes_fts, rowid, id, title, description)
-    VALUES ('delete', OLD.rowid, OLD.id, OLD.title, OLD.description);
+    INSERT INTO nodes_fts(nodes_fts, rowid, id, title, description, note)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.title, OLD.description, OLD.note);
 END;
 
 CREATE TRIGGER nodes_fts_update AFTER UPDATE ON nodes BEGIN
-    INSERT INTO nodes_fts(nodes_fts, rowid, id, title, description)
-    VALUES ('delete', OLD.rowid, OLD.id, OLD.title, OLD.description);
-    INSERT INTO nodes_fts(rowid, id, title, description)
-    VALUES (NEW.rowid, NEW.id, NEW.title, NEW.description);
+    INSERT INTO nodes_fts(nodes_fts, rowid, id, title, description, note)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.title, OLD.description, OLD.note);
+    INSERT INTO nodes_fts(rowid, id, title, description, note)
+    VALUES (NEW.rowid, NEW.id, NEW.title, NEW.description, NEW.note);
 END;
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -302,9 +311,18 @@ END;
 -- ─────────────────────────────────────────────────────────────────────────────
 
 CREATE TABLE idempotency (
-    project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    -- Dedup scope. A real project id for node writes; the empty string '' is a
+    -- reserved sentinel scope for pre-creation writes (CreateProject, whose id is
+    -- minted by the request itself). No FK to projects — the sentinel scope has no
+    -- project row, and projects are never hard-deleted (there is no DeleteProject),
+    -- so the ON DELETE CASCADE it used to carry bought nothing.
+    project_id      TEXT NOT NULL,
     idempotency_key TEXT NOT NULL,
     seq             INTEGER NOT NULL,
+    -- Id of the entity the original request minted (node or project), so a
+    -- replayed retry can return it instead of an empty payload. NULL for
+    -- non-create mutations.
+    entity_id       TEXT,
     created_at      INTEGER NOT NULL DEFAULT (unixepoch()),
     PRIMARY KEY (project_id, idempotency_key)
 ) STRICT;

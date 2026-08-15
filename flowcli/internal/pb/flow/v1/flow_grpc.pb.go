@@ -23,6 +23,7 @@ const (
 	FlowService_GetSnapshot_FullMethodName      = "/flow.v1.FlowService/GetSnapshot"
 	FlowService_ListEvents_FullMethodName       = "/flow.v1.FlowService/ListEvents"
 	FlowService_Search_FullMethodName           = "/flow.v1.FlowService/Search"
+	FlowService_PollChanges_FullMethodName      = "/flow.v1.FlowService/PollChanges"
 	FlowService_Watch_FullMethodName            = "/flow.v1.FlowService/Watch"
 	FlowService_CreateNode_FullMethodName       = "/flow.v1.FlowService/CreateNode"
 	FlowService_UpdateNode_FullMethodName       = "/flow.v1.FlowService/UpdateNode"
@@ -34,6 +35,10 @@ const (
 	FlowService_AddDependency_FullMethodName    = "/flow.v1.FlowService/AddDependency"
 	FlowService_RemoveDependency_FullMethodName = "/flow.v1.FlowService/RemoveDependency"
 	FlowService_Undo_FullMethodName             = "/flow.v1.FlowService/Undo"
+	FlowService_MoveNode_FullMethodName         = "/flow.v1.FlowService/MoveNode"
+	FlowService_CreateProject_FullMethodName    = "/flow.v1.FlowService/CreateProject"
+	FlowService_UpdateProject_FullMethodName    = "/flow.v1.FlowService/UpdateProject"
+	FlowService_ArchiveProject_FullMethodName   = "/flow.v1.FlowService/ArchiveProject"
 )
 
 // FlowServiceClient is the client API for FlowService service.
@@ -50,6 +55,8 @@ type FlowServiceClient interface {
 	ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (*ListEventsResponse, error)
 	// Full-text searches nodes within a project.
 	Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error)
+	// Unary forward poll of the event log — the stateless substitute for Watch.
+	PollChanges(ctx context.Context, in *PollChangesRequest, opts ...grpc.CallOption) (*PollChangesResponse, error)
 	// The one long-lived call. Every client holds exactly one.
 	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error)
 	// Creates a node.
@@ -72,6 +79,14 @@ type FlowServiceClient interface {
 	RemoveDependency(ctx context.Context, in *RemoveDependencyRequest, opts ...grpc.CallOption) (*RemoveDependencyResponse, error)
 	// Reverses a prior event.
 	Undo(ctx context.Context, in *UndoRequest, opts ...grpc.CallOption) (*UndoResponse, error)
+	// Moves a node to a new parent and/or changes its kind.
+	MoveNode(ctx context.Context, in *MoveNodeRequest, opts ...grpc.CallOption) (*MoveNodeResponse, error)
+	// Creates a project (namespace op; returns the created Project).
+	CreateProject(ctx context.Context, in *CreateProjectRequest, opts ...grpc.CallOption) (*CreateProjectResponse, error)
+	// Edits a project's name/description.
+	UpdateProject(ctx context.Context, in *UpdateProjectRequest, opts ...grpc.CallOption) (*UpdateProjectResponse, error)
+	// Archives or un-archives a project.
+	ArchiveProject(ctx context.Context, in *ArchiveProjectRequest, opts ...grpc.CallOption) (*ArchiveProjectResponse, error)
 }
 
 type flowServiceClient struct {
@@ -116,6 +131,16 @@ func (c *flowServiceClient) Search(ctx context.Context, in *SearchRequest, opts 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SearchResponse)
 	err := c.cc.Invoke(ctx, FlowService_Search_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *flowServiceClient) PollChanges(ctx context.Context, in *PollChangesRequest, opts ...grpc.CallOption) (*PollChangesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PollChangesResponse)
+	err := c.cc.Invoke(ctx, FlowService_PollChanges_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -241,6 +266,46 @@ func (c *flowServiceClient) Undo(ctx context.Context, in *UndoRequest, opts ...g
 	return out, nil
 }
 
+func (c *flowServiceClient) MoveNode(ctx context.Context, in *MoveNodeRequest, opts ...grpc.CallOption) (*MoveNodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MoveNodeResponse)
+	err := c.cc.Invoke(ctx, FlowService_MoveNode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *flowServiceClient) CreateProject(ctx context.Context, in *CreateProjectRequest, opts ...grpc.CallOption) (*CreateProjectResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateProjectResponse)
+	err := c.cc.Invoke(ctx, FlowService_CreateProject_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *flowServiceClient) UpdateProject(ctx context.Context, in *UpdateProjectRequest, opts ...grpc.CallOption) (*UpdateProjectResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateProjectResponse)
+	err := c.cc.Invoke(ctx, FlowService_UpdateProject_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *flowServiceClient) ArchiveProject(ctx context.Context, in *ArchiveProjectRequest, opts ...grpc.CallOption) (*ArchiveProjectResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ArchiveProjectResponse)
+	err := c.cc.Invoke(ctx, FlowService_ArchiveProject_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // FlowServiceServer is the server API for FlowService service.
 // All implementations must embed UnimplementedFlowServiceServer
 // for forward compatibility.
@@ -255,6 +320,8 @@ type FlowServiceServer interface {
 	ListEvents(context.Context, *ListEventsRequest) (*ListEventsResponse, error)
 	// Full-text searches nodes within a project.
 	Search(context.Context, *SearchRequest) (*SearchResponse, error)
+	// Unary forward poll of the event log — the stateless substitute for Watch.
+	PollChanges(context.Context, *PollChangesRequest) (*PollChangesResponse, error)
 	// The one long-lived call. Every client holds exactly one.
 	Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error
 	// Creates a node.
@@ -277,6 +344,14 @@ type FlowServiceServer interface {
 	RemoveDependency(context.Context, *RemoveDependencyRequest) (*RemoveDependencyResponse, error)
 	// Reverses a prior event.
 	Undo(context.Context, *UndoRequest) (*UndoResponse, error)
+	// Moves a node to a new parent and/or changes its kind.
+	MoveNode(context.Context, *MoveNodeRequest) (*MoveNodeResponse, error)
+	// Creates a project (namespace op; returns the created Project).
+	CreateProject(context.Context, *CreateProjectRequest) (*CreateProjectResponse, error)
+	// Edits a project's name/description.
+	UpdateProject(context.Context, *UpdateProjectRequest) (*UpdateProjectResponse, error)
+	// Archives or un-archives a project.
+	ArchiveProject(context.Context, *ArchiveProjectRequest) (*ArchiveProjectResponse, error)
 	mustEmbedUnimplementedFlowServiceServer()
 }
 
@@ -298,6 +373,9 @@ func (UnimplementedFlowServiceServer) ListEvents(context.Context, *ListEventsReq
 }
 func (UnimplementedFlowServiceServer) Search(context.Context, *SearchRequest) (*SearchResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Search not implemented")
+}
+func (UnimplementedFlowServiceServer) PollChanges(context.Context, *PollChangesRequest) (*PollChangesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PollChanges not implemented")
 }
 func (UnimplementedFlowServiceServer) Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method Watch not implemented")
@@ -331,6 +409,18 @@ func (UnimplementedFlowServiceServer) RemoveDependency(context.Context, *RemoveD
 }
 func (UnimplementedFlowServiceServer) Undo(context.Context, *UndoRequest) (*UndoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Undo not implemented")
+}
+func (UnimplementedFlowServiceServer) MoveNode(context.Context, *MoveNodeRequest) (*MoveNodeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MoveNode not implemented")
+}
+func (UnimplementedFlowServiceServer) CreateProject(context.Context, *CreateProjectRequest) (*CreateProjectResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateProject not implemented")
+}
+func (UnimplementedFlowServiceServer) UpdateProject(context.Context, *UpdateProjectRequest) (*UpdateProjectResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateProject not implemented")
+}
+func (UnimplementedFlowServiceServer) ArchiveProject(context.Context, *ArchiveProjectRequest) (*ArchiveProjectResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ArchiveProject not implemented")
 }
 func (UnimplementedFlowServiceServer) mustEmbedUnimplementedFlowServiceServer() {}
 func (UnimplementedFlowServiceServer) testEmbeddedByValue()                     {}
@@ -421,6 +511,24 @@ func _FlowService_Search_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(FlowServiceServer).Search(ctx, req.(*SearchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _FlowService_PollChanges_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PollChangesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FlowServiceServer).PollChanges(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FlowService_PollChanges_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FlowServiceServer).PollChanges(ctx, req.(*PollChangesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -616,6 +724,78 @@ func _FlowService_Undo_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _FlowService_MoveNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MoveNodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FlowServiceServer).MoveNode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FlowService_MoveNode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FlowServiceServer).MoveNode(ctx, req.(*MoveNodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _FlowService_CreateProject_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateProjectRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FlowServiceServer).CreateProject(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FlowService_CreateProject_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FlowServiceServer).CreateProject(ctx, req.(*CreateProjectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _FlowService_UpdateProject_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateProjectRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FlowServiceServer).UpdateProject(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FlowService_UpdateProject_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FlowServiceServer).UpdateProject(ctx, req.(*UpdateProjectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _FlowService_ArchiveProject_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ArchiveProjectRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FlowServiceServer).ArchiveProject(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FlowService_ArchiveProject_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FlowServiceServer).ArchiveProject(ctx, req.(*ArchiveProjectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // FlowService_ServiceDesc is the grpc.ServiceDesc for FlowService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -638,6 +818,10 @@ var FlowService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Search",
 			Handler:    _FlowService_Search_Handler,
+		},
+		{
+			MethodName: "PollChanges",
+			Handler:    _FlowService_PollChanges_Handler,
 		},
 		{
 			MethodName: "CreateNode",
@@ -678,6 +862,22 @@ var FlowService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Undo",
 			Handler:    _FlowService_Undo_Handler,
+		},
+		{
+			MethodName: "MoveNode",
+			Handler:    _FlowService_MoveNode_Handler,
+		},
+		{
+			MethodName: "CreateProject",
+			Handler:    _FlowService_CreateProject_Handler,
+		},
+		{
+			MethodName: "UpdateProject",
+			Handler:    _FlowService_UpdateProject_Handler,
+		},
+		{
+			MethodName: "ArchiveProject",
+			Handler:    _FlowService_ArchiveProject_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

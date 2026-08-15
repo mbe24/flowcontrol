@@ -109,7 +109,7 @@ impl Store for SqliteStore {
         // Nodes with effective status from the node_state view.
         let rows = sqlx::query(
             "SELECT n.id, n.project_id, COALESCE(n.parent_id,'') AS parent_id,
-                    n.kind, n.title, n.description, n.condition, COALESCE(n.reference,'') AS reference,
+                    n.kind, n.title, n.description, n.condition, n.note, COALESCE(n.reference,'') AS reference,
                     n.declared_status, n.wp_state, n.position, n.created_at, n.updated_at,
                     n.status AS effective_status
              FROM node_state n
@@ -204,25 +204,62 @@ impl Store for SqliteStore {
         Ok(out)
     }
 
+    async fn poll_changes(
+        &self,
+        project_id: &str,
+        after_seq: i64,
+        limit: i32,
+    ) -> Result<pb::PollChangesResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let lim = if limit <= 0 { 1000 } else { limit };
+        let rows = sqlx::query(
+            "SELECT seq, project_id, COALESCE(node_id,'') AS node_id, kind, author, summary, payload AS payload_json, created_at
+             FROM events WHERE project_id = ? AND seq > ?
+             ORDER BY seq ASC LIMIT ?",
+        )
+        .bind(project_id)
+        .bind(after_seq)
+        .bind(lim)
+        .fetch_all(&*self.pool)
+        .await?;
+        let mut events = Vec::with_capacity(rows.len());
+        for r in rows {
+            events.push(proto_event(r));
+        }
+        // Next cursor: the last event returned, or the caller's cursor if nothing
+        // new (never skip events on the next poll).
+        let seq = events.last().map(|e| e.seq).unwrap_or(after_seq);
+        Ok(pb::PollChangesResponse { events, seq })
+    }
+
     async fn list_events(
         &self,
         project_id: &str,
+        node_id: &str,
+        before_seq: i64,
         limit: i32,
-    ) -> Result<Vec<pb::Event>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<(Vec<pb::Event>, bool), Box<dyn std::error::Error + Send + Sync>> {
+        let lim = limit.max(1);
+        // Fetch one extra to tell whether an older page exists. An empty node_id
+        // means "no node filter"; before_seq 0 means "from the newest".
         let rows = sqlx::query(
             "SELECT seq, project_id, COALESCE(node_id,'') AS node_id, kind, author, summary, payload AS payload_json, created_at
-             FROM events WHERE project_id = ?
+             FROM events
+             WHERE project_id = ?
+               AND (? = '' OR node_id = ?)
+               AND (? = 0 OR seq < ?)
              ORDER BY seq DESC LIMIT ?",
         )
         .bind(project_id)
-        .bind(limit.max(1))
+        .bind(node_id)
+        .bind(node_id)
+        .bind(before_seq)
+        .bind(before_seq)
+        .bind(lim + 1)
         .fetch_all(&*self.pool)
         .await?;
-        let mut out = Vec::with_capacity(rows.len());
-        for r in rows {
-            out.push(proto_event(r));
-        }
-        Ok(out)
+        let has_more = rows.len() as i32 > lim;
+        let out: Vec<pb::Event> = rows.into_iter().take(lim as usize).map(proto_event).collect();
+        Ok((out, has_more))
     }
 
     async fn search(
@@ -233,7 +270,7 @@ impl Store for SqliteStore {
     ) -> Result<Vec<pb::Node>, Box<dyn std::error::Error + Send + Sync>> {
         let rows = sqlx::query(
             "SELECT n.id, n.project_id, COALESCE(n.parent_id,'') AS parent_id,
-                    n.kind, n.title, n.description, n.condition, COALESCE(n.reference,'') AS reference,
+                    n.kind, n.title, n.description, n.condition, n.note, COALESCE(n.reference,'') AS reference,
                     n.declared_status, n.wp_state, n.position, n.created_at, n.updated_at,
                     ns.status AS effective_status
              FROM nodes n
@@ -264,11 +301,23 @@ impl Store for SqliteStore {
         &self,
         req: pb::CreateNodeRequest,
     ) -> Result<pb::Mutation, Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(seq) = self
-            .check_idempotency(&req.project_id, idem_key(req.meta.as_ref()))
+        if let Some(hit) = self
+            .check_idempotency_created(&req.project_id, idem_key(req.meta.as_ref()))
             .await?
         {
-            return Ok(Self::empty_mutation(seq));
+            // Replay: return the node the original request created, so a retry
+            // (e.g. an agent after a timeout) still learns the id.
+            if let Some(eid) = &hit.entity_id {
+                if let Some(n) = self.fetch_node(eid).await? {
+                    return Ok(pb::Mutation {
+                        events: vec![],
+                        changed_nodes: vec![n],
+                        changed_progress: vec![],
+                        seq: hit.seq,
+                    });
+                }
+            }
+            return Ok(Self::empty_mutation(hit.seq));
         }
         let node_id = new_node_id();
         let wp = if req.kind == pb::NodeKind::WorkPackage as i32 {
@@ -277,8 +326,8 @@ impl Store for SqliteStore {
             None
         };
         sqlx::query(
-            "INSERT INTO nodes (id, project_id, parent_id, kind, title, description, condition, reference, declared_status, wp_state, position)
-             VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), 'OPEN', ?, ?)",
+            "INSERT INTO nodes (id, project_id, parent_id, kind, title, description, condition, note, reference, declared_status, wp_state, position)
+             VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), 'OPEN', ?, ?)",
         )
         .bind(&node_id)
         .bind(&req.project_id)
@@ -287,6 +336,7 @@ impl Store for SqliteStore {
         .bind(&req.title)
         .bind(&req.description)
         .bind(&req.condition)
+        .bind(&req.note)
         .bind(&req.reference)
         .bind(wp)
         .bind(req.position)
@@ -308,8 +358,13 @@ impl Store for SqliteStore {
         let m = self
             .finish_mutation(&req.project_id, vec![event], vec![node_id.clone()])
             .await?;
-        self.record_idempotency(&req.project_id, idem_key(req.meta.as_ref()), m.seq)
-            .await?;
+        self.record_idempotency_created(
+            &req.project_id,
+            idem_key(req.meta.as_ref()),
+            m.seq,
+            &node_id,
+        )
+        .await?;
         Ok(m)
     }
 
@@ -364,6 +419,13 @@ impl Store for SqliteStore {
                 "reference" => {
                     sqlx::query("UPDATE nodes SET reference = ? WHERE id = ?")
                         .bind(&req.reference)
+                        .bind(&req.node_id)
+                        .execute(&*self.pool)
+                        .await?;
+                }
+                "note" => {
+                    sqlx::query("UPDATE nodes SET note = ? WHERE id = ?")
+                        .bind(&req.note)
                         .bind(&req.node_id)
                         .execute(&*self.pool)
                         .await?;
@@ -425,30 +487,70 @@ impl Store for SqliteStore {
             }
         }
         let before = node_before_json(&current);
-        let dependents: Vec<String> =
-            sqlx::query_scalar("SELECT blocked_id FROM dependencies WHERE blocker_id = ?")
-                .bind(&req.node_id)
-                .fetch_all(&*self.pool)
-                .await?;
+        // Snapshot the whole subtree up front: the cascade delete removes children
+        // silently, so we must collect their EXTERNAL dependents (whose effective
+        // status may change) and emit a delete event per node before they vanish.
+        let dependents: Vec<String> = sqlx::query_scalar(
+            "WITH RECURSIVE subtree(id) AS (
+                 SELECT ? UNION ALL
+                 SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id
+             )
+             SELECT DISTINCT d.blocked_id FROM dependencies d
+             JOIN subtree s ON d.blocker_id = s.id
+             WHERE d.blocked_id NOT IN (SELECT id FROM subtree)",
+        )
+        .bind(&req.node_id)
+        .fetch_all(&*self.pool)
+        .await?;
+        let descendants: Vec<String> = sqlx::query_scalar(
+            "WITH RECURSIVE subtree(id) AS (
+                 SELECT ? UNION ALL
+                 SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id
+             )
+             SELECT id FROM subtree WHERE id <> ?",
+        )
+        .bind(&req.node_id)
+        .bind(&req.node_id)
+        .fetch_all(&*self.pool)
+        .await?;
         sqlx::query("DELETE FROM nodes WHERE id = ?")
             .bind(&req.node_id)
             .execute(&*self.pool)
             .await?;
         let author = author_of(req.meta.as_ref());
-        // The node is gone, so the event cannot reference it (events.node_id has
-        // an FK); the `before` payload carries what undo needs to restore it.
-        let event = append_event(
-            &self.pool,
-            &project_id,
-            "",
-            "NODE_DELETED",
-            &author,
-            &format!("deleted {}", req.node_id),
-            &before,
-        )
-        .await?;
+        // Every delete event carries node_id = '' (the row is gone; events.node_id
+        // has an FK). The root's `before` payload is what undo restores; children
+        // carry a minimal payload (a subtree delete is not child-wise undoable).
+        let mut events = Vec::with_capacity(descendants.len() + 1);
+        for cid in &descendants {
+            let payload = serde_json::json!({ "before": { "id": cid } }).to_string();
+            events.push(
+                append_event(
+                    &self.pool,
+                    &project_id,
+                    "",
+                    "NODE_DELETED",
+                    &author,
+                    &format!("deleted {}", cid),
+                    &payload,
+                )
+                .await?,
+            );
+        }
+        events.push(
+            append_event(
+                &self.pool,
+                &project_id,
+                "",
+                "NODE_DELETED",
+                &author,
+                &format!("deleted {}", req.node_id),
+                &before,
+            )
+            .await?,
+        );
         let m = self
-            .finish_mutation(&project_id, vec![event], dependents)
+            .finish_mutation(&project_id, events, dependents)
             .await?;
         self.record_idempotency(&project_id, idem_key(req.meta.as_ref()), m.seq)
             .await?;
@@ -867,6 +969,228 @@ impl Store for SqliteStore {
             .await?;
         Ok(m)
     }
+
+    async fn move_node(
+        &self,
+        req: pb::MoveNodeRequest,
+    ) -> Result<pb::Mutation, Box<dyn std::error::Error + Send + Sync>> {
+        let current = self
+            .fetch_node(&req.node_id)
+            .await?
+            .ok_or("node not found")?;
+        let project_id = current.project_id.clone();
+        if let Some(seq) = self
+            .check_idempotency(&project_id, idem_key(req.meta.as_ref()))
+            .await?
+        {
+            return Ok(Self::empty_mutation(seq));
+        }
+        let old_kind = current.kind;
+        let new_kind = req.kind;
+        let wp = pb::NodeKind::WorkPackage as i32;
+        // Structural validation: scope to STEP<->TASK + reparent; the trigger
+        // backstops parent-kind / cross-project / self-parent / children-validity.
+        if new_kind == pb::NodeKind::Unspecified as i32 {
+            return Err("move requires a target kind".into());
+        }
+        if old_kind == wp || new_kind == wp {
+            return Err("move cannot promote or demote a work package".into());
+        }
+        if req.parent_id == req.node_id {
+            return Err("a node cannot be its own parent".into());
+        }
+        let author = author_of(req.meta.as_ref());
+
+        let mut tx = self.pool.begin().await?;
+        let mut events: Vec<pb::Event> = Vec::new();
+        let mut affected = vec![req.node_id.clone()];
+
+        // TASK -> STEP demote drops this node's step children (destructive, no
+        // undo — consented at the client). Collect each child's dependents BEFORE
+        // deleting, and write the NODE_DELETED events with node_id = '' (the child
+        // is gone; the events.node_id FK would reject its id).
+        if old_kind == pb::NodeKind::Task as i32 && new_kind == pb::NodeKind::Step as i32 {
+            let child_ids: Vec<String> =
+                sqlx::query_scalar("SELECT id FROM nodes WHERE parent_id = ?")
+                    .bind(&req.node_id)
+                    .fetch_all(&mut *tx)
+                    .await?;
+            for cid in &child_ids {
+                let deps: Vec<String> =
+                    sqlx::query_scalar("SELECT blocked_id FROM dependencies WHERE blocker_id = ?")
+                        .bind(cid)
+                        .fetch_all(&mut *tx)
+                        .await?;
+                affected.extend(deps);
+                sqlx::query("DELETE FROM nodes WHERE id = ?")
+                    .bind(cid)
+                    .execute(&mut *tx)
+                    .await?;
+                let payload = serde_json::json!({ "before": { "id": cid } }).to_string();
+                let row = sqlx::query(
+                    "INSERT INTO events (project_id, node_id, kind, author, summary, payload)
+                     VALUES (?, NULL, 'NODE_DELETED', ?, ?, ?)
+                     RETURNING seq, project_id, COALESCE(node_id,'') AS node_id, kind, author, summary, payload AS payload_json, created_at",
+                )
+                .bind(&project_id)
+                .bind(&author)
+                .bind(format!("deleted {}", cid))
+                .bind(&payload)
+                .fetch_one(&mut *tx)
+                .await?;
+                events.push(proto_event(row));
+            }
+        }
+
+        // A kind change invalidates the verification: a STEP must not carry a
+        // TASK's agent badge (and vice versa).
+        if old_kind != new_kind {
+            sqlx::query("DELETE FROM verifications WHERE node_id = ?")
+                .bind(&req.node_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        // Append into the new parent's sibling list.
+        let new_pos: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(position), 0) + 100 FROM nodes WHERE parent_id = ?",
+        )
+        .bind(&req.parent_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "UPDATE nodes SET parent_id = NULLIF(?, ''), kind = ?, position = ? WHERE id = ?",
+        )
+        .bind(&req.parent_id)
+        .bind(kind_str(new_kind))
+        .bind(new_pos as i32)
+        .bind(&req.node_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let payload = serde_json::json!({
+            "before": { "parent_id": &current.parent_id, "kind": kind_str(old_kind) },
+            "after": { "parent_id": &req.parent_id, "kind": kind_str(new_kind) }
+        })
+        .to_string();
+        let row = sqlx::query(
+            "INSERT INTO events (project_id, node_id, kind, author, summary, payload)
+             VALUES (?, ?, 'NODE_UPDATED', ?, ?, ?)
+             RETURNING seq, project_id, COALESCE(node_id,'') AS node_id, kind, author, summary, payload AS payload_json, created_at",
+        )
+        .bind(&project_id)
+        .bind(&req.node_id)
+        .bind(&author)
+        .bind(format!("moved {}", req.node_id))
+        .bind(&payload)
+        .fetch_one(&mut *tx)
+        .await?;
+        events.push(proto_event(row));
+
+        tx.commit().await?;
+
+        let m = self.finish_mutation(&project_id, events, affected).await?;
+        self.record_idempotency(&project_id, idem_key(req.meta.as_ref()), m.seq)
+            .await?;
+        Ok(m)
+    }
+
+    async fn create_project(
+        &self,
+        req: pb::CreateProjectRequest,
+    ) -> Result<pb::Project, Box<dyn std::error::Error + Send + Sync>> {
+        // Sentinel-scoped idempotency ('' scope): projects log no event and the id
+        // is minted here, so a retry dedups under '' and returns the created row.
+        if let Some(hit) = self
+            .check_idempotency_created("", idem_key(req.meta.as_ref()))
+            .await?
+        {
+            if let Some(pid) = &hit.entity_id {
+                if let Some(p) = self.fetch_project(pid).await? {
+                    return Ok(p);
+                }
+            }
+        }
+        let id = new_project_id();
+        sqlx::query("INSERT INTO projects (id, name, description) VALUES (?, ?, ?)")
+            .bind(&id)
+            .bind(&req.name)
+            .bind(&req.description)
+            .execute(&*self.pool)
+            .await?;
+        self.record_idempotency_created("", idem_key(req.meta.as_ref()), 0, &id)
+            .await?;
+        match self.fetch_project(&id).await? {
+            Some(p) => Ok(p),
+            None => Err("created project not found".into()),
+        }
+    }
+
+    async fn update_project(
+        &self,
+        req: pb::UpdateProjectRequest,
+    ) -> Result<pb::Project, Box<dyn std::error::Error + Send + Sync>> {
+        if self.fetch_project(&req.project_id).await?.is_none() {
+            return Err("project not found".into());
+        }
+        if req.update_mask.is_empty() {
+            return Err("update_mask cannot be empty".into());
+        }
+        for f in &req.update_mask {
+            match f.as_str() {
+                "name" => {
+                    sqlx::query("UPDATE projects SET name = ? WHERE id = ?")
+                        .bind(&req.name)
+                        .bind(&req.project_id)
+                        .execute(&*self.pool)
+                        .await?;
+                }
+                "description" => {
+                    sqlx::query("UPDATE projects SET description = ? WHERE id = ?")
+                        .bind(&req.description)
+                        .bind(&req.project_id)
+                        .execute(&*self.pool)
+                        .await?;
+                }
+                other => return Err(format!("unknown update_mask field: {}", other).into()),
+            }
+        }
+        sqlx::query("UPDATE projects SET updated_at = unixepoch() WHERE id = ?")
+            .bind(&req.project_id)
+            .execute(&*self.pool)
+            .await?;
+        match self.fetch_project(&req.project_id).await? {
+            Some(p) => Ok(p),
+            None => Err("project not found".into()),
+        }
+    }
+
+    async fn archive_project(
+        &self,
+        req: pb::ArchiveProjectRequest,
+    ) -> Result<pb::Project, Box<dyn std::error::Error + Send + Sync>> {
+        if self.fetch_project(&req.project_id).await?.is_none() {
+            return Err("project not found".into());
+        }
+        if req.archived {
+            sqlx::query("UPDATE projects SET archived_at = unixepoch(), updated_at = unixepoch() WHERE id = ?")
+                .bind(&req.project_id)
+                .execute(&*self.pool)
+                .await?;
+        } else {
+            sqlx::query(
+                "UPDATE projects SET archived_at = NULL, updated_at = unixepoch() WHERE id = ?",
+            )
+            .bind(&req.project_id)
+            .execute(&*self.pool)
+            .await?;
+        }
+        match self.fetch_project(&req.project_id).await? {
+            Some(p) => Ok(p),
+            None => Err("project not found".into()),
+        }
+    }
 }
 
 // ── shared write helpers ─────────────────────────────────────────────────────
@@ -1018,7 +1342,7 @@ impl SqliteStore {
     ) -> Result<Option<pb::Node>, Box<dyn std::error::Error + Send + Sync>> {
         let row = sqlx::query(
             "SELECT n.id, n.project_id, COALESCE(n.parent_id,'') AS parent_id,
-                    n.kind, n.title, n.description, n.condition, n.reference,
+                    n.kind, n.title, n.description, n.condition, n.note, COALESCE(n.reference,'') AS reference,
                     n.declared_status, n.wp_state, n.position, n.created_at, n.updated_at,
                     n.status AS effective_status
              FROM node_state n WHERE n.id = ?",
@@ -1046,9 +1370,79 @@ impl SqliteStore {
                 .unwrap_or_default(),
         )
     }
+
+    /// Fetch one project as a proto Project (None if missing).
+    async fn fetch_project(
+        &self,
+        id: &str,
+    ) -> Result<Option<pb::Project>, Box<dyn std::error::Error + Send + Sync>> {
+        let row = sqlx::query(
+            "SELECT id, name, description, COALESCE(archived_at,0) AS archived_at, created_at
+             FROM projects WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&*self.pool)
+        .await?;
+        Ok(row.map(|r| pb::Project {
+            id: r.get("id"),
+            name: r.get("name"),
+            description: r.get("description"),
+            archived_at: r.get("archived_at"),
+            created_at: r.get("created_at"),
+        }))
+    }
+
+    /// Idempotency lookup that also returns the id of the entity the original
+    /// request created (for create replays). Used by create_node / create_project.
+    async fn check_idempotency_created(
+        &self,
+        scope: &str,
+        key: Option<&str>,
+    ) -> Result<Option<IdemHit>, Box<dyn std::error::Error + Send + Sync>> {
+        let Some(key) = key else { return Ok(None) };
+        let row = sqlx::query(
+            "SELECT seq, entity_id FROM idempotency WHERE project_id = ? AND idempotency_key = ?",
+        )
+        .bind(scope)
+        .bind(key)
+        .fetch_optional(&*self.pool)
+        .await?;
+        Ok(row.map(|r| IdemHit {
+            seq: r.get("seq"),
+            entity_id: r.get::<Option<String>, _>("entity_id"),
+        }))
+    }
+
+    /// Record an idempotency row that remembers the created entity's id.
+    async fn record_idempotency_created(
+        &self,
+        scope: &str,
+        key: Option<&str>,
+        seq: i64,
+        entity_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let Some(key) = key else { return Ok(()) };
+        sqlx::query(
+            "INSERT OR IGNORE INTO idempotency (project_id, idempotency_key, seq, entity_id) VALUES (?, ?, ?, ?)",
+        )
+        .bind(scope)
+        .bind(key)
+        .bind(seq)
+        .bind(entity_id)
+        .execute(&*self.pool)
+        .await?;
+        Ok(())
+    }
 }
 
 // ── free helpers ─────────────────────────────────────────────────────────────
+
+/// An idempotency-ledger hit: the recorded cursor plus the entity the original
+/// create minted (None for non-create mutations).
+struct IdemHit {
+    seq: i64,
+    entity_id: Option<String>,
+}
 
 fn author_of(meta: Option<&pb::WriteMeta>) -> String {
     meta.map(|m| m.author.clone()).unwrap_or_default()
@@ -1091,6 +1485,7 @@ fn node_before_json(n: &pb::Node) -> String {
             "title": &n.title,
             "description": &n.description,
             "condition": &n.condition,
+            "note": &n.note,
             "reference": &n.reference,
             "declared_status": declared_str(n.declared_status),
             "wp_state": wp,
@@ -1111,8 +1506,8 @@ async fn restore_node(
         None
     };
     sqlx::query(
-        "INSERT OR IGNORE INTO nodes (id, project_id, parent_id, kind, title, description, condition, reference, declared_status, wp_state, position)
-         VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)",
+        "INSERT OR IGNORE INTO nodes (id, project_id, parent_id, kind, title, description, condition, note, reference, declared_status, wp_state, position)
+         VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)",
     )
     .bind(str_val(obj, "id"))
     .bind(str_val(obj, "project_id"))
@@ -1121,6 +1516,7 @@ async fn restore_node(
     .bind(str_val(obj, "title"))
     .bind(str_val(obj, "description"))
     .bind(str_val(obj, "condition"))
+    .bind(str_val(obj, "note"))
     .bind(str_val(obj, "reference"))
     .bind(declared_str_from(str_val(obj, "declared_status")))
     .bind(wp)
@@ -1194,6 +1590,20 @@ fn new_node_id() -> String {
     format!("node-{}-{:08x}", ms, rand)
 }
 
+/// Short, unique project id, same scheme as node ids.
+fn new_project_id() -> String {
+    let ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let rand = {
+        use std::collections::hash_map::RandomState;
+        use std::hash::{BuildHasher, Hasher};
+        RandomState::new().build_hasher().finish()
+    };
+    format!("prj-{}-{:08x}", ms, rand)
+}
+
 /// Convert a node_state row into a proto Node.
 fn row_to_node(r: sqlx::sqlite::SqliteRow) -> pb::Node {
     let kind = match r.get::<String, _>("kind").as_str() {
@@ -1220,6 +1630,7 @@ fn row_to_node(r: sqlx::sqlite::SqliteRow) -> pb::Node {
         title: r.get("title"),
         description: r.get("description"),
         condition: r.get("condition"),
+        note: r.get("note"),
         reference: r.get("reference"),
         declared_status: declared as i32,
         status: effective_status(r.get::<String, _>("effective_status").as_str()),

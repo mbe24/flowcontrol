@@ -97,9 +97,8 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let mut sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     tokio::spawn(async move {
-        sig.recv().await;
+        shutdown_signal().await;
         let _ = tx.send(());
     });
 
@@ -111,4 +110,30 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
 
     info!("shutting down");
     Ok(())
+}
+
+/// Wait for a shutdown signal, so `axum::serve` can drain gracefully. Split by OS
+/// because the signal APIs differ: on Unix we catch SIGINT (Ctrl-C) and SIGTERM
+/// (what `docker stop`/systemd send); on Windows, Ctrl-C and the console-close
+/// event. Handler install failing at startup is fatal, hence `expect`.
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+    let mut int = signal(SignalKind::interrupt()).expect("install SIGINT handler");
+    tokio::select! {
+        _ = term.recv() => {}
+        _ = int.recv() => {}
+    }
+}
+
+#[cfg(windows)]
+async fn shutdown_signal() {
+    use tokio::signal::windows::{ctrl_c, ctrl_close};
+    let mut cc = ctrl_c().expect("install Ctrl-C handler");
+    let mut close = ctrl_close().expect("install console-close handler");
+    tokio::select! {
+        _ = cc.recv() => {}
+        _ = close.recv() => {}
+    }
 }

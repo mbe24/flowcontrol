@@ -233,6 +233,14 @@ export declare type Node = Message<"flow.v1.Node"> & {
    * @generated from field: string reference = 15;
    */
   reference: string;
+
+  /**
+   * STEP body — a few sentences shown on expand. Distinct from `description`
+   * (task paragraphs). Empty for work packages and tasks.
+   *
+   * @generated from field: string note = 16;
+   */
+  note: string;
 };
 
 /**
@@ -289,7 +297,7 @@ export declare type Event = Message<"flow.v1.Event"> & {
   projectId: string;
 
   /**
-   * Affected node; empty for project-level events.
+   * Affected node; empty for node-less events (e.g. deletes, dependency edges).
    *
    * @generated from field: string node_id = 3;
    */
@@ -496,7 +504,8 @@ export declare type GetSnapshotResponse = Message<"flow.v1.GetSnapshotResponse">
   recentEvents: Event[];
 
   /**
-   * The cursor to resume Watch from. Everything above is consistent as of here.
+   * Cursor to resume Watch from — treat as OPAQUE (no arithmetic on it).
+   * Everything above is consistent as of here.
    *
    * @generated from field: int64 seq = 6;
    */
@@ -578,7 +587,7 @@ export declare type ListEventsResponse = Message<"flow.v1.ListEventsResponse"> &
 export declare const ListEventsResponseSchema: GenMessage<ListEventsResponse>;
 
 /**
- * Full-text search over node titles and descriptions within a project.
+ * Full-text search over node titles, descriptions and step notes within a project.
  *
  * @generated from message flow.v1.SearchRequest
  */
@@ -630,6 +639,70 @@ export declare type SearchResponse = Message<"flow.v1.SearchResponse"> & {
  * Use `create(SearchResponseSchema)` to create a new message.
  */
 export declare const SearchResponseSchema: GenMessage<SearchResponse>;
+
+/**
+ * Unary "everything after cursor N" for one project — the stateless poll that a
+ * client (e.g. an MCP agent) uses instead of holding Watch open. Forward-ordered,
+ * unlike ListEvents which pages backwards.
+ *
+ * @generated from message flow.v1.PollChangesRequest
+ */
+export declare type PollChangesRequest = Message<"flow.v1.PollChangesRequest"> & {
+  /**
+   * The project to poll.
+   *
+   * @generated from field: string project_id = 1;
+   */
+  projectId: string;
+
+  /**
+   * Return events with seq strictly greater than this. 0 = from the beginning.
+   *
+   * @generated from field: int64 after_seq = 2;
+   */
+  afterSeq: bigint;
+
+  /**
+   * Max events to return (0 = server default).
+   *
+   * @generated from field: int32 limit = 3;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message flow.v1.PollChangesRequest.
+ * Use `create(PollChangesRequestSchema)` to create a new message.
+ */
+export declare const PollChangesRequestSchema: GenMessage<PollChangesRequest>;
+
+/**
+ * One forward page of changes.
+ *
+ * @generated from message flow.v1.PollChangesResponse
+ */
+export declare type PollChangesResponse = Message<"flow.v1.PollChangesResponse"> & {
+  /**
+   * Events after the cursor, oldest first.
+   *
+   * @generated from field: repeated flow.v1.Event events = 1;
+   */
+  events: Event[];
+
+  /**
+   * The cursor to poll from next: the last returned event's seq, or the request's
+   * after_seq when nothing new. Treat as opaque.
+   *
+   * @generated from field: int64 seq = 2;
+   */
+  seq: bigint;
+};
+
+/**
+ * Describes the message flow.v1.PollChangesResponse.
+ * Use `create(PollChangesResponseSchema)` to create a new message.
+ */
+export declare const PollChangesResponseSchema: GenMessage<PollChangesResponse>;
 
 /**
  * Opens the long-lived change stream for a project.
@@ -723,7 +796,9 @@ export declare const WatchResponseSchema: GenMessage<WatchResponse>;
  */
 export declare type WriteMeta = Message<"flow.v1.WriteMeta"> & {
   /**
-   * Plain name of the author (human or agent).
+   * Display label for activity feeds only. UNTRUSTED, client-supplied; never an
+   * identity or an authorization input. Verified identity, if ever added, arrives
+   * via transport auth and a separate SERVER-POPULATED field (see reserved 3).
    *
    * @generated from field: string author = 1;
    */
@@ -811,6 +886,13 @@ export declare type CreateNodeRequest = Message<"flow.v1.CreateNodeRequest"> & {
    * @generated from field: string reference = 9;
    */
   reference: string;
+
+  /**
+   * STEP body; lets a step created with a body round-trip.
+   *
+   * @generated from field: string note = 10;
+   */
+  note: string;
 };
 
 /**
@@ -841,7 +923,7 @@ export declare type UpdateNodeRequest = Message<"flow.v1.UpdateNodeRequest"> & {
 
   /**
    * Only the fields named here are written. Allowed: title, description,
-   * condition, position, wp_state, reference.
+   * condition, position, wp_state, reference, note.
    *
    * @generated from field: repeated string update_mask = 3;
    */
@@ -888,6 +970,13 @@ export declare type UpdateNodeRequest = Message<"flow.v1.UpdateNodeRequest"> & {
    * @generated from field: string reference = 9;
    */
   reference: string;
+
+  /**
+   * New STEP body, when masked.
+   *
+   * @generated from field: string note = 10;
+   */
+  note: string;
 };
 
 /**
@@ -1164,7 +1253,9 @@ export declare type UndoRequest = Message<"flow.v1.UndoRequest"> & {
   projectId: string;
 
   /**
-   * The event to reverse; 0 for the most recent.
+   * The event to reverse; 0 for the most recent. (0 = "most recent" is a
+   * single-writer convenience; a multi-writer caller such as an agent should pass
+   * an explicit seq — see the flowmcp tool discipline.)
    *
    * @generated from field: int64 seq = 3;
    */
@@ -1176,6 +1267,248 @@ export declare type UndoRequest = Message<"flow.v1.UndoRequest"> & {
  * Use `create(UndoRequestSchema)` to create a new message.
  */
 export declare const UndoRequestSchema: GenMessage<UndoRequest>;
+
+/**
+ * Creates a project. The id is minted by the server and returned on the Project.
+ *
+ * @generated from message flow.v1.CreateProjectRequest
+ */
+export declare type CreateProjectRequest = Message<"flow.v1.CreateProjectRequest"> & {
+  /**
+   * Author (display) + idempotency key. See WriteMeta.
+   *
+   * @generated from field: flow.v1.WriteMeta meta = 1;
+   */
+  meta?: WriteMeta;
+
+  /**
+   * Display name.
+   *
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * Short goal or context.
+   *
+   * @generated from field: string description = 3;
+   */
+  description: string;
+};
+
+/**
+ * Describes the message flow.v1.CreateProjectRequest.
+ * Use `create(CreateProjectRequestSchema)` to create a new message.
+ */
+export declare const CreateProjectRequestSchema: GenMessage<CreateProjectRequest>;
+
+/**
+ * Result of creating a project (carries the server-minted id).
+ *
+ * @generated from message flow.v1.CreateProjectResponse
+ */
+export declare type CreateProjectResponse = Message<"flow.v1.CreateProjectResponse"> & {
+  /**
+   * The created project.
+   *
+   * @generated from field: flow.v1.Project project = 1;
+   */
+  project?: Project;
+};
+
+/**
+ * Describes the message flow.v1.CreateProjectResponse.
+ * Use `create(CreateProjectResponseSchema)` to create a new message.
+ */
+export declare const CreateProjectResponseSchema: GenMessage<CreateProjectResponse>;
+
+/**
+ * Edits a project's name and/or description.
+ *
+ * @generated from message flow.v1.UpdateProjectRequest
+ */
+export declare type UpdateProjectRequest = Message<"flow.v1.UpdateProjectRequest"> & {
+  /**
+   * Author + idempotency key.
+   *
+   * @generated from field: flow.v1.WriteMeta meta = 1;
+   */
+  meta?: WriteMeta;
+
+  /**
+   * The project to edit.
+   *
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * Only the fields named here are written. Allowed: name, description.
+   *
+   * @generated from field: repeated string update_mask = 3;
+   */
+  updateMask: string[];
+
+  /**
+   * New name, when masked.
+   *
+   * @generated from field: string name = 4;
+   */
+  name: string;
+
+  /**
+   * New description, when masked.
+   *
+   * @generated from field: string description = 5;
+   */
+  description: string;
+};
+
+/**
+ * Describes the message flow.v1.UpdateProjectRequest.
+ * Use `create(UpdateProjectRequestSchema)` to create a new message.
+ */
+export declare const UpdateProjectRequestSchema: GenMessage<UpdateProjectRequest>;
+
+/**
+ * Result of updating a project.
+ *
+ * @generated from message flow.v1.UpdateProjectResponse
+ */
+export declare type UpdateProjectResponse = Message<"flow.v1.UpdateProjectResponse"> & {
+  /**
+   * The updated project.
+   *
+   * @generated from field: flow.v1.Project project = 1;
+   */
+  project?: Project;
+};
+
+/**
+ * Describes the message flow.v1.UpdateProjectResponse.
+ * Use `create(UpdateProjectResponseSchema)` to create a new message.
+ */
+export declare const UpdateProjectResponseSchema: GenMessage<UpdateProjectResponse>;
+
+/**
+ * Archives or un-archives a project.
+ *
+ * @generated from message flow.v1.ArchiveProjectRequest
+ */
+export declare type ArchiveProjectRequest = Message<"flow.v1.ArchiveProjectRequest"> & {
+  /**
+   * Author + idempotency key.
+   *
+   * @generated from field: flow.v1.WriteMeta meta = 1;
+   */
+  meta?: WriteMeta;
+
+  /**
+   * The project to (un)archive.
+   *
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * True sets archived_at to now; false clears it.
+   *
+   * @generated from field: bool archived = 3;
+   */
+  archived: boolean;
+};
+
+/**
+ * Describes the message flow.v1.ArchiveProjectRequest.
+ * Use `create(ArchiveProjectRequestSchema)` to create a new message.
+ */
+export declare const ArchiveProjectRequestSchema: GenMessage<ArchiveProjectRequest>;
+
+/**
+ * Result of (un)archiving a project.
+ *
+ * @generated from message flow.v1.ArchiveProjectResponse
+ */
+export declare type ArchiveProjectResponse = Message<"flow.v1.ArchiveProjectResponse"> & {
+  /**
+   * The project after the change.
+   *
+   * @generated from field: flow.v1.Project project = 1;
+   */
+  project?: Project;
+};
+
+/**
+ * Describes the message flow.v1.ArchiveProjectResponse.
+ * Use `create(ArchiveProjectResponseSchema)` to create a new message.
+ */
+export declare const ArchiveProjectResponseSchema: GenMessage<ArchiveProjectResponse>;
+
+/**
+ * Moves a node to a new parent and/or changes its kind. Scoped to STEP<->TASK
+ * promote/demote and TASK reparent, within a single project; any kind transition
+ * touching WORK_PACKAGE is rejected. A TASK->STEP demote permanently deletes the
+ * task's own steps (destructive, not undoable). The server appends the node to
+ * its new sibling list; a deliberate reorder is a separate UpdateNode(position).
+ *
+ * @generated from message flow.v1.MoveNodeRequest
+ */
+export declare type MoveNodeRequest = Message<"flow.v1.MoveNodeRequest"> & {
+  /**
+   * Author + idempotency key.
+   *
+   * @generated from field: flow.v1.WriteMeta meta = 1;
+   */
+  meta?: WriteMeta;
+
+  /**
+   * The node to move.
+   *
+   * @generated from field: string node_id = 2;
+   */
+  nodeId: string;
+
+  /**
+   * The new parent: a WORK_PACKAGE for kind=TASK, a TASK for kind=STEP. The
+   * project is derived from node_id; there is deliberately no project_id field.
+   *
+   * @generated from field: string parent_id = 3;
+   */
+  parentId: string;
+
+  /**
+   * The node's new kind (promote/demote), or its current kind for a pure reparent.
+   *
+   * @generated from field: flow.v1.NodeKind kind = 4;
+   */
+  kind: NodeKind;
+};
+
+/**
+ * Describes the message flow.v1.MoveNodeRequest.
+ * Use `create(MoveNodeRequestSchema)` to create a new message.
+ */
+export declare const MoveNodeRequestSchema: GenMessage<MoveNodeRequest>;
+
+/**
+ * Result of moving a node.
+ *
+ * @generated from message flow.v1.MoveNodeResponse
+ */
+export declare type MoveNodeResponse = Message<"flow.v1.MoveNodeResponse"> & {
+  /**
+   * The mutation payload (moved node + any cascade + deleted-child events).
+   *
+   * @generated from field: flow.v1.Mutation mutation = 1;
+   */
+  mutation?: Mutation;
+};
+
+/**
+ * Describes the message flow.v1.MoveNodeResponse.
+ * Use `create(MoveNodeResponseSchema)` to create a new message.
+ */
+export declare const MoveNodeResponseSchema: GenMessage<MoveNodeResponse>;
 
 /**
  * The payload of any successful mutation, shared by every mutation RPC so all
@@ -1792,6 +2125,16 @@ export declare const FlowService: GenService<{
     output: typeof SearchResponseSchema;
   },
   /**
+   * Unary forward poll of the event log — the stateless substitute for Watch.
+   *
+   * @generated from rpc flow.v1.FlowService.PollChanges
+   */
+  pollChanges: {
+    methodKind: "unary";
+    input: typeof PollChangesRequestSchema;
+    output: typeof PollChangesResponseSchema;
+  },
+  /**
    * The one long-lived call. Every client holds exactly one.
    *
    * @generated from rpc flow.v1.FlowService.Watch
@@ -1900,6 +2243,46 @@ export declare const FlowService: GenService<{
     methodKind: "unary";
     input: typeof UndoRequestSchema;
     output: typeof UndoResponseSchema;
+  },
+  /**
+   * Moves a node to a new parent and/or changes its kind.
+   *
+   * @generated from rpc flow.v1.FlowService.MoveNode
+   */
+  moveNode: {
+    methodKind: "unary";
+    input: typeof MoveNodeRequestSchema;
+    output: typeof MoveNodeResponseSchema;
+  },
+  /**
+   * Creates a project (namespace op; returns the created Project).
+   *
+   * @generated from rpc flow.v1.FlowService.CreateProject
+   */
+  createProject: {
+    methodKind: "unary";
+    input: typeof CreateProjectRequestSchema;
+    output: typeof CreateProjectResponseSchema;
+  },
+  /**
+   * Edits a project's name/description.
+   *
+   * @generated from rpc flow.v1.FlowService.UpdateProject
+   */
+  updateProject: {
+    methodKind: "unary";
+    input: typeof UpdateProjectRequestSchema;
+    output: typeof UpdateProjectResponseSchema;
+  },
+  /**
+   * Archives or un-archives a project.
+   *
+   * @generated from rpc flow.v1.FlowService.ArchiveProject
+   */
+  archiveProject: {
+    methodKind: "unary";
+    input: typeof ArchiveProjectRequestSchema;
+    output: typeof ArchiveProjectResponseSchema;
   },
 }>;
 

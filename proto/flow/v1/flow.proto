@@ -9,10 +9,11 @@ package flow.v1;
 //   * unary  — commands and one-shot reads
 //   * stream — Watch, the single push channel every client holds open
 //
-// Every mutation returns the events it produced, and those same events arrive
-// on Watch. A client can therefore apply its own change optimistically and let
-// the stream reconcile, or ignore the return value and wait for the stream.
-// Both work; neither needs polling.
+// Every node mutation returns the events it produced, and those same events
+// arrive on Watch. A client can therefore apply its own change optimistically and
+// let the stream reconcile, or ignore the return value and wait for the stream.
+// Both work; neither needs polling. (Project lifecycle RPCs are the exception:
+// projects are a namespace, log no events, and return the Project directly.)
 
 // ─── enums ───────────────────────────────────────────────────────────────────
 
@@ -185,6 +186,9 @@ message Node {
   int64 updated_at = 14;
   // Free-text reference to an external system (e.g. JIRA-123).
   string reference = 15;
+  // STEP body — a few sentences shown on expand. Distinct from `description`
+  // (task paragraphs). Empty for work packages and tasks.
+  string note = 16;
 }
 
 // A directed edge in the dependency DAG: blocker must be done before blocked.
@@ -201,7 +205,7 @@ message Event {
   int64 seq = 1;
   // Owning project.
   string project_id = 2;
-  // Affected node; empty for project-level events.
+  // Affected node; empty for node-less events (e.g. deletes, dependency edges).
   string node_id = 3;
   // What changed.
   EventKind kind = 4;
@@ -265,7 +269,8 @@ message GetSnapshotResponse {
   repeated Progress progress = 4;
   // Recent activity only — full history is paged through ListEvents.
   repeated Event recent_events = 5;
-  // The cursor to resume Watch from. Everything above is consistent as of here.
+  // Cursor to resume Watch from — treat as OPAQUE (no arithmetic on it).
+  // Everything above is consistent as of here.
   int64 seq = 6;
 }
 
@@ -289,7 +294,7 @@ message ListEventsResponse {
   bool has_more = 2;
 }
 
-// Full-text search over node titles and descriptions within a project.
+// Full-text search over node titles, descriptions and step notes within a project.
 message SearchRequest {
   // Scope the search to one project.
   string project_id = 1;
@@ -303,6 +308,27 @@ message SearchRequest {
 message SearchResponse {
   // Matching nodes.
   repeated Node nodes = 1;
+}
+
+// Unary "everything after cursor N" for one project — the stateless poll that a
+// client (e.g. an MCP agent) uses instead of holding Watch open. Forward-ordered,
+// unlike ListEvents which pages backwards.
+message PollChangesRequest {
+  // The project to poll.
+  string project_id = 1;
+  // Return events with seq strictly greater than this. 0 = from the beginning.
+  int64 after_seq = 2;
+  // Max events to return (0 = server default).
+  int32 limit = 3;
+}
+
+// One forward page of changes.
+message PollChangesResponse {
+  // Events after the cursor, oldest first.
+  repeated Event events = 1;
+  // The cursor to poll from next: the last returned event's seq, or the request's
+  // after_seq when nothing new. Treat as opaque.
+  int64 seq = 2;
 }
 
 // ─── the push channel ────────────────────────────────────────────────────────
@@ -338,10 +364,15 @@ message WatchResponse {
 
 // Common metadata attached to every mutation.
 message WriteMeta {
-  // Plain name of the author (human or agent).
+  // Display label for activity feeds only. UNTRUSTED, client-supplied; never an
+  // identity or an authorization input. Verified identity, if ever added, arrives
+  // via transport auth and a separate SERVER-POPULATED field (see reserved 3).
   string author = 1;
   // Idempotency key; a retried request with the same key writes one event.
   string idempotency_key = 2;
+  // Parked for a future server-populated verified principal. Do not repurpose.
+  reserved 3;
+  reserved "principal_id";
 }
 
 // Creates a new node under an optional parent.
@@ -364,6 +395,8 @@ message CreateNodeRequest {
   int32 position = 8;
   // External reference (plain text).
   string reference = 9;
+  // STEP body; lets a step created with a body round-trip.
+  string note = 10;
 }
 
 // Edits editable fields of an existing node.
@@ -373,7 +406,7 @@ message UpdateNodeRequest {
   // The node to update.
   string node_id = 2;
   // Only the fields named here are written. Allowed: title, description,
-  // condition, position, wp_state, reference.
+  // condition, position, wp_state, reference, note.
   repeated string update_mask = 3;
   // New title, when masked.
   string title = 4;
@@ -387,6 +420,8 @@ message UpdateNodeRequest {
   WorkPackageState wp_state = 8;
   // New external reference, when masked.
   string reference = 9;
+  // New STEP body, when masked.
+  string note = 10;
 }
 
 // Deletes a node and its subtree.
@@ -469,8 +504,85 @@ message UndoRequest {
   WriteMeta meta = 1;
   // The project the event belongs to.
   string project_id = 2;
-  // The event to reverse; 0 for the most recent.
+  // The event to reverse; 0 for the most recent. (0 = "most recent" is a
+  // single-writer convenience; a multi-writer caller such as an agent should pass
+  // an explicit seq — see the flowmcp tool discipline.)
   int64 seq = 3;
+}
+
+// ─── project lifecycle (namespace ops: log no event, return the Project) ──────
+
+// Creates a project. The id is minted by the server and returned on the Project.
+message CreateProjectRequest {
+  // Author (display) + idempotency key. See WriteMeta.
+  WriteMeta meta = 1;
+  // Display name.
+  string name = 2;
+  // Short goal or context.
+  string description = 3;
+}
+// Result of creating a project (carries the server-minted id).
+message CreateProjectResponse {
+  // The created project.
+  Project project = 1;
+}
+
+// Edits a project's name and/or description.
+message UpdateProjectRequest {
+  // Author + idempotency key.
+  WriteMeta meta = 1;
+  // The project to edit.
+  string project_id = 2;
+  // Only the fields named here are written. Allowed: name, description.
+  repeated string update_mask = 3;
+  // New name, when masked.
+  string name = 4;
+  // New description, when masked.
+  string description = 5;
+}
+// Result of updating a project.
+message UpdateProjectResponse {
+  // The updated project.
+  Project project = 1;
+}
+
+// Archives or un-archives a project.
+message ArchiveProjectRequest {
+  // Author + idempotency key.
+  WriteMeta meta = 1;
+  // The project to (un)archive.
+  string project_id = 2;
+  // True sets archived_at to now; false clears it.
+  bool archived = 3;
+}
+// Result of (un)archiving a project.
+message ArchiveProjectResponse {
+  // The project after the change.
+  Project project = 1;
+}
+
+// ─── move (reparent / promote / demote) — node activity, returns a Mutation ───
+
+// Moves a node to a new parent and/or changes its kind. Scoped to STEP<->TASK
+// promote/demote and TASK reparent, within a single project; any kind transition
+// touching WORK_PACKAGE is rejected. A TASK->STEP demote permanently deletes the
+// task's own steps (destructive, not undoable). The server appends the node to
+// its new sibling list; a deliberate reorder is a separate UpdateNode(position).
+message MoveNodeRequest {
+  // Author + idempotency key.
+  WriteMeta meta = 1;
+  // The node to move.
+  string node_id = 2;
+  // The new parent: a WORK_PACKAGE for kind=TASK, a TASK for kind=STEP. The
+  // project is derived from node_id; there is deliberately no project_id field.
+  string parent_id = 3;
+  // The node's new kind (promote/demote), or its current kind for a pure reparent.
+  NodeKind kind = 4;
+}
+// Result of moving a node.
+message MoveNodeResponse {
+  // The mutation payload (moved node + any cascade + deleted-child events).
+  Mutation mutation = 1;
 }
 
 // The payload of any successful mutation, shared by every mutation RPC so all
@@ -558,6 +670,8 @@ service FlowService {
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
   // Full-text searches nodes within a project.
   rpc Search(SearchRequest) returns (SearchResponse);
+  // Unary forward poll of the event log — the stateless substitute for Watch.
+  rpc PollChanges(PollChangesRequest) returns (PollChangesResponse);
   // The one long-lived call. Every client holds exactly one.
   rpc Watch(WatchRequest) returns (stream WatchResponse);
   // Creates a node.
@@ -580,4 +694,12 @@ service FlowService {
   rpc RemoveDependency(RemoveDependencyRequest) returns (RemoveDependencyResponse);
   // Reverses a prior event.
   rpc Undo(UndoRequest) returns (UndoResponse);
+  // Moves a node to a new parent and/or changes its kind.
+  rpc MoveNode(MoveNodeRequest) returns (MoveNodeResponse);
+  // Creates a project (namespace op; returns the created Project).
+  rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
+  // Edits a project's name/description.
+  rpc UpdateProject(UpdateProjectRequest) returns (UpdateProjectResponse);
+  // Archives or un-archives a project.
+  rpc ArchiveProject(ArchiveProjectRequest) returns (ArchiveProjectResponse);
 }

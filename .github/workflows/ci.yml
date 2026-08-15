@@ -25,11 +25,14 @@ jobs:
       - name: Type + Svelte check
         run: npm run check -w flowui
 
+      - name: Test
+        run: npm run test -w flowui
+
       - name: Build
         run: npm run build -w flowui
 
   go:
-    name: Go TUI (flowcli · vet · build)
+    name: Go TUI (flowcli · vet · test · build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -42,6 +45,116 @@ jobs:
         working-directory: flowcli
         run: go vet ./...
 
+      - name: Test
+        working-directory: flowcli
+        run: go test ./...
+
       - name: Build
         working-directory: flowcli
         run: go build ./...
+
+  core:
+    name: Core (flowd · fmt · clippy · test)
+    runs-on: ubuntu-latest
+    # Native on Linux, where build scripts are not blocked (the local dev host
+    # runs these in Docker via `npm run test:flowd`). Generated bindings are
+    # checked in (flowd/src/generated), so no buf step is needed here.
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: flowd
+
+      - name: Format
+        working-directory: flowd
+        run: cargo fmt --check
+
+      - name: Clippy
+        working-directory: flowd
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: flowd
+        run: cargo test
+
+      # Build the flowd binary once here; mcp-integration reuses it (no rebuild).
+      # Strip debug symbols — the integration job only needs to RUN it (~15 MB, not ~120).
+      - name: Build binary
+        working-directory: flowd
+        run: |
+          cargo build --bin flowd
+          strip target/debug/flowd
+
+      - name: Upload flowd binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowd-bin
+          path: flowd/target/debug/flowd
+          retention-days: 1
+
+  mcp:
+    name: MCP (flowmcp · typecheck · test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck -w flowmcp
+
+      - name: Test
+        run: npm run test -w flowmcp
+
+  mcp-integration:
+    name: MCP (flowmcp · integration · real flowd)
+    runs-on: ubuntu-latest
+    needs: core # reuse the flowd binary built in `core` — no Rust toolchain here
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download flowd binary
+        uses: actions/download-artifact@v4
+        with:
+          name: flowd-bin
+          path: bin
+
+      # Start the prebuilt flowd (seeded, in-memory) and wait for the gRPC port.
+      - name: Start flowd
+        run: |
+          BIN="$(find bin -type f -name flowd | head -1)"
+          test -n "$BIN" || { echo "flowd binary not found in artifact" >&2; exit 1; }
+          chmod +x "$BIN"
+          "$BIN" serve --addr 127.0.0.1:50051 --db :memory: --seed &
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/127.0.0.1/50051) 2>/dev/null && exit 0
+            sleep 1
+          done
+          echo "flowd did not start" >&2; exit 1
+
+      - name: Integration smoke
+        env:
+          RUN_INTEGRATION: "1"
+          FLOWD_ADDR: http://127.0.0.1:50051
+        run: npm run test:integration -w flowmcp

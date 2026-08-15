@@ -184,6 +184,96 @@ async fn undo_over_grpc() {
 }
 
 #[tokio::test]
+async fn create_project_over_grpc() {
+    let (mut client, _port) = spawn_server().await;
+    let p = client
+        .create_project(pb::CreateProjectRequest {
+            meta: Some(wm("t", "")),
+            name: "Grpc Proj".into(),
+            description: "made over the wire".into(),
+        })
+        .await
+        .expect("rpc")
+        .into_inner()
+        .project
+        .expect("project");
+    assert!(p.id.starts_with("prj-"));
+    assert_eq!(p.name, "Grpc Proj");
+}
+
+#[tokio::test]
+async fn move_wp_transition_maps_to_failed_precondition() {
+    let (mut client, _port) = spawn_server().await;
+    let status = client
+        .move_node(pb::MoveNodeRequest {
+            meta: Some(wm("t", "")),
+            node_id: "T-1042".into(),
+            parent_id: String::new(),
+            kind: pb::NodeKind::WorkPackage as i32,
+        })
+        .await
+        .expect_err("should be rejected");
+    assert_eq!(status.code(), tonic::Code::FailedPrecondition);
+}
+
+#[tokio::test]
+async fn move_unknown_node_maps_to_not_found() {
+    let (mut client, _port) = spawn_server().await;
+    let status = client
+        .move_node(pb::MoveNodeRequest {
+            meta: Some(wm("t", "")),
+            node_id: "nope".into(),
+            parent_id: "WP-AUTH".into(),
+            kind: pb::NodeKind::Task as i32,
+        })
+        .await
+        .expect_err("should be not found");
+    assert_eq!(status.code(), tonic::Code::NotFound);
+}
+
+#[tokio::test]
+async fn undo_non_undoable_maps_to_failed_precondition() {
+    let (mut client, _port) = spawn_server().await;
+    // update_node produces a NODE_UPDATED event, which undo cannot reverse.
+    let m = client
+        .update_node(pb::UpdateNodeRequest {
+            meta: Some(wm("t", "")),
+            node_id: "T-1042".into(),
+            update_mask: vec!["title".into()],
+            title: "Renamed".into(),
+            ..Default::default()
+        })
+        .await
+        .expect("update")
+        .into_inner()
+        .mutation
+        .expect("mutation");
+    let status = client
+        .undo(pb::UndoRequest {
+            meta: Some(wm("t", "")),
+            project_id: "prj-travel".into(),
+            seq: m.seq,
+        })
+        .await
+        .expect_err("should be un-undoable");
+    assert_eq!(status.code(), tonic::Code::FailedPrecondition);
+}
+
+#[tokio::test]
+async fn search_bad_query_maps_to_invalid_argument() {
+    let (mut client, _port) = spawn_server().await;
+    let status = client
+        .search(pb::SearchRequest {
+            project_id: "prj-travel".into(),
+            query: "(unbalanced".into(),
+            limit: 10,
+        })
+        .await
+        .expect_err("malformed fts query");
+    assert_eq!(status.code(), tonic::Code::InvalidArgument);
+}
+
+#[tokio::test]
 async fn watch_streams_live_events_over_grpc() {
     let (mut client, _port) = spawn_server().await;
     // from_seq = 0 -> "from now"; the seeded events are not replayed.
