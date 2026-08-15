@@ -1,19 +1,24 @@
 // Command flowcli is the FlowControl terminal UI.
 //
-// It talks to a store.Store. By default it opens gRPC to the flowd core
-// (127.0.0.1:50051); `--demo` keeps the in-memory fixture so the UI can be
-// explored without a running server. Nothing under internal/ui changes either
-// way.
+// It talks to a store.Store. By default it connects to a running daemon (flowd or
+// flowd.js) over gRPC-web at 127.0.0.1:50051; `--demo` keeps the in-memory fixture
+// so the UI can be explored without a server. Nothing under internal/ui changes
+// either way.
+//
+// flowcli is a connect-only client: it does not start a daemon. In normal use one
+// is already running — your agent's MCP ensures it, or you ran `flow ui`. If none
+// is reachable, flowcli prints how to start one rather than erroring inside the UI
+// (see plan/design.daemon-lifecycle.md).
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"flowcli/internal/store"
 	"flowcli/internal/ui"
@@ -28,8 +33,8 @@ func main() {
 		addrDefault = v
 	}
 	var (
-		demo   = flag.Bool("demo", false, "use the in-memory fixture instead of the flowd server")
-		addr   = flag.String("addr", addrDefault, "flowd gRPC address")
+		demo   = flag.Bool("demo", false, "use the in-memory fixture instead of a daemon")
+		addr   = flag.String("addr", addrDefault, "daemon address (gRPC-web over HTTP/1.1)")
 		author = flag.String("author", "you", "author name attached to writes")
 	)
 	flag.Parse()
@@ -38,13 +43,16 @@ func main() {
 	if *demo {
 		s = store.NewMemory()
 	} else {
-		conn, err := dial(*addr)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "flowcli: %v\n", err)
+		g := store.NewGRPC(*addr, *author)
+		if err := preflight(g); err != nil {
+			fmt.Fprintf(os.Stderr,
+				"flowcli: no FlowControl daemon reachable at %s.\n"+
+					"  Start one with `flow ui` (it opens the app too), or it starts automatically\n"+
+					"  when your agent (MCP) connects. Use --demo to explore offline.\n  (%v)\n",
+				*addr, err)
 			os.Exit(1)
 		}
-		defer conn.Close()
-		s = store.NewGRPC(conn, *author)
+		s = g
 	}
 
 	p := tea.NewProgram(ui.New(s), tea.WithAltScreen())
@@ -54,9 +62,12 @@ func main() {
 	}
 }
 
-// dial opens a gRPC connection to the flowd core. grpc.NewClient dials lazily,
-// so the first store call triggers the connection — letting the CLI start
-// alongside the server without a hard requirement that it be up first.
-func dial(addr string) (*grpc.ClientConn, error) {
-	return grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+// preflight makes one bounded call so a missing daemon becomes an actionable hint
+// instead of an error surfaced inside the TUI. The daemon is stateless between
+// calls, so this costs nothing beyond confirming reachability.
+func preflight(s store.Store) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := s.Projects(ctx)
+	return err
 }

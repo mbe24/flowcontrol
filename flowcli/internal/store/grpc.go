@@ -13,31 +13,43 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/grpc"
-
 	flowv1 "flowcli/internal/pb/flow/v1"
 )
 
-// GRPC is a Store that talks to the flowd core over gRPC. Reads are served
-// from GetSnapshot; writes are unary mutations.
+// flowClient is the subset of FlowService the TUI actually uses — all unary.
+// It is deliberately local, not grpc-go's or connect-go's generated interface, so
+// the store (and its test mock) depend on neither transport's request/response
+// wrappers nor the server-streaming Watch. The connect-go transport is adapted to
+// it in connect.go.
+type flowClient interface {
+	ListProjects(context.Context, *flowv1.ListProjectsRequest) (*flowv1.ListProjectsResponse, error)
+	GetSnapshot(context.Context, *flowv1.GetSnapshotRequest) (*flowv1.GetSnapshotResponse, error)
+	SetStatus(context.Context, *flowv1.SetStatusRequest) (*flowv1.SetStatusResponse, error)
+	SetVerdict(context.Context, *flowv1.SetVerdictRequest) (*flowv1.SetVerdictResponse, error)
+	AddComment(context.Context, *flowv1.AddCommentRequest) (*flowv1.AddCommentResponse, error)
+	CreateProject(context.Context, *flowv1.CreateProjectRequest) (*flowv1.CreateProjectResponse, error)
+	CreateNode(context.Context, *flowv1.CreateNodeRequest) (*flowv1.CreateNodeResponse, error)
+	UpdateNode(context.Context, *flowv1.UpdateNodeRequest) (*flowv1.UpdateNodeResponse, error)
+	DeleteNode(context.Context, *flowv1.DeleteNodeRequest) (*flowv1.DeleteNodeResponse, error)
+	AddDependency(context.Context, *flowv1.AddDependencyRequest) (*flowv1.AddDependencyResponse, error)
+	RemoveDependency(context.Context, *flowv1.RemoveDependencyRequest) (*flowv1.RemoveDependencyResponse, error)
+}
+
+// GRPC is a Store that talks to a daemon over the flowClient seam. Reads are
+// served from GetSnapshot; writes are unary mutations. (Named GRPC for history;
+// the transport is now gRPC-web over HTTP/1.1 — see connect.go / NewGRPC.)
 type GRPC struct {
-	c   flowv1.FlowServiceClient
+	c   flowClient
 	who string
 
 	mu     sync.Mutex
 	cached *flowv1.GetSnapshotResponse // last fetched, shared by Nodes/Dependencies/Activity
 }
 
-// NewGRPC wraps an open gRPC connection (client side) as a Store. `who` is the
-// author name attached to every write (humans and agents get the same byline).
-func NewGRPC(conn *grpc.ClientConn, who string) *GRPC {
-	return NewGRPCWithClient(flowv1.NewFlowServiceClient(conn), who)
-}
-
-// NewGRPCWithClient builds a Store backed by a supplied FlowServiceClient.
-// This is the seam tests use to inject a fake/mock client; NewGRPC is a thin
-// wrapper that constructs the real client from a connection.
-func NewGRPCWithClient(client flowv1.FlowServiceClient, who string) *GRPC {
+// NewGRPCWithClient builds a Store backed by a supplied flowClient. This is the
+// seam tests use to inject a fake/mock client; NewGRPC (connect.go) is the thin
+// wrapper that constructs the real gRPC-web client.
+func NewGRPCWithClient(client flowClient, who string) *GRPC {
 	return &GRPC{c: client, who: who}
 }
 

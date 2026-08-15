@@ -13,12 +13,22 @@ plugins:
   - remote: buf.build/grpc/go:v1.5.1
     out: ../flowcli/internal/pb
     opt: paths=source_relative
+  # connect-go client (gRPC-web/Connect over HTTP/1.1) so flowcli talks to flowd.js
+  # (HTTP/1.1 only) as well as the Rust flowd. Import: .../flow/v1/flowv1connect.
+  - remote: buf.build/connectrpc/go:v1.18.1
+    out: ../flowcli/internal/pb
+    opt: paths=source_relative
 
-  # Rust (flowd)
+  # Rust (flowcore owns the bindings now). Messages (prost) compile on every
+  # target; the tonic service is a separate file that flowcore/src/lib.rs include!s
+  # only under the `grpc` feature (the wasm build stays tonic-free). `no_include`
+  # stops prost from appending `include!("flow.v1.tonic.rs")` to the messages
+  # module — which would pull tonic in unconditionally and defeat that gating.
   - remote: buf.build/community/neoeinstein-prost:v0.4.0
-    out: ../flowd/src/generated
+    out: ../flowcore/src/generated
   - remote: buf.build/community/neoeinstein-tonic:v0.4.0
-    out: ../flowd/src/generated
+    out: ../flowcore/src/generated
+    opt: no_include
 
   # TypeScript: shared @flow/api generated once under shared/flowapi, imported
   # by flowui and flowmcp via the npm workspace.
