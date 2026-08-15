@@ -71,7 +71,7 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         info!("seeded fixture data");
     }
 
-    let store: DynStore = std::sync::Arc::new(NativeStore::new(SqliteStore::new(conn)));
+    let store: DynStore = std::sync::Arc::new(NativeStore::new(SqliteStore::open(conn)));
     let grpc_service = ServerTonic::new(FlowServiceServer::new(store));
     // tonic-web decodes HTTP/1.1 grpc-web (browser) while raw gRPC over HTTP/2
     // (TUI) passes straight through; into_router() exposes the gRPC routes as an

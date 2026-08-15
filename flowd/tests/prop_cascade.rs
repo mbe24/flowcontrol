@@ -23,7 +23,7 @@ fn meta() -> Option<pb::WriteMeta> {
 /// Returns (store, project_id, task_ids).
 async fn build(decls: &[u8], edges: &[(usize, usize)]) -> (NativeStore, String, Vec<String>) {
     let conn = db::open(":memory:").unwrap();
-    let store = NativeStore::new(SqliteStore::new(conn));
+    let store = NativeStore::new(SqliteStore::open(conn));
     let proj = store
         .create_project(pb::CreateProjectRequest {
             meta: meta(),

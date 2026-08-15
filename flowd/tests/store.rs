@@ -8,7 +8,7 @@ use flowd::store::{NativeStore, SqliteStore, Store};
 async fn seeded_store() -> NativeStore {
     let conn = db::open(":memory:").expect("db open");
     db::seed(&conn).expect("seed");
-    NativeStore::new(SqliteStore::new(conn))
+    NativeStore::new(SqliteStore::open(conn))
 }
 
 #[tokio::test]

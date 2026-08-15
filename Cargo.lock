@@ -352,6 +352,7 @@ name = "flowwasm"
 version = "0.1.0"
 dependencies = [
  "flowcore",
+ "serde_json",
  "wasm-bindgen",
 ]
 

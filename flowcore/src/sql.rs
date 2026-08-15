@@ -28,6 +28,50 @@ pub enum Value {
     Blob(Vec<u8>),
 }
 
+impl From<i64> for Value {
+    fn from(v: i64) -> Self {
+        Value::Int(v)
+    }
+}
+impl From<i32> for Value {
+    fn from(v: i32) -> Self {
+        Value::Int(v as i64)
+    }
+}
+impl From<bool> for Value {
+    fn from(v: bool) -> Self {
+        Value::Int(v as i64)
+    }
+}
+impl From<String> for Value {
+    fn from(v: String) -> Self {
+        Value::Text(v)
+    }
+}
+impl From<&String> for Value {
+    fn from(v: &String) -> Self {
+        Value::Text(v.clone())
+    }
+}
+impl From<&str> for Value {
+    fn from(v: &str) -> Self {
+        Value::Text(v.to_string())
+    }
+}
+impl From<Option<&str>> for Value {
+    fn from(v: Option<&str>) -> Self {
+        v.map(|s| Value::Text(s.to_string())).unwrap_or(Value::Null)
+    }
+}
+
+/// Build a `&[Value]` param slice from expressions convertible via `Value::from`.
+#[macro_export]
+macro_rules! values {
+    ($($v:expr),* $(,)?) => {
+        &[$($crate::sql::Value::from($v)),*][..]
+    };
+}
+
 /// Result of a non-returning statement.
 #[derive(Clone, Copy, Debug)]
 pub struct Exec {
@@ -58,7 +102,9 @@ impl Row {
         match self.cell(col)? {
             Value::Int(i) => Ok(*i),
             Value::Null => Ok(0),
-            v => Err(DomainError::internal(format!("{col}: expected int, got {v:?}"))),
+            v => Err(DomainError::internal(format!(
+                "{col}: expected int, got {v:?}"
+            ))),
         }
     }
 
@@ -70,7 +116,9 @@ impl Row {
     pub fn get_str(&self, col: &str) -> DResult<String> {
         match self.cell(col)? {
             Value::Text(s) => Ok(s.clone()),
-            v => Err(DomainError::internal(format!("{col}: expected text, got {v:?}"))),
+            v => Err(DomainError::internal(format!(
+                "{col}: expected text, got {v:?}"
+            ))),
         }
     }
 
@@ -79,7 +127,35 @@ impl Row {
         match self.cell(col)? {
             Value::Text(s) => Ok(Some(s.clone())),
             Value::Null => Ok(None),
-            v => Err(DomainError::internal(format!("{col}: expected text/null, got {v:?}"))),
+            v => Err(DomainError::internal(format!(
+                "{col}: expected text/null, got {v:?}"
+            ))),
+        }
+    }
+
+    fn cell_at(&self, i: usize) -> DResult<&Value> {
+        self.cells
+            .get(i)
+            .map(|(_, v)| v)
+            .ok_or_else(|| DomainError::internal(format!("no column at index {i}")))
+    }
+
+    /// First-column helpers for scalar/`query_scalar`-style selects.
+    pub fn get_i64_at(&self, i: usize) -> DResult<i64> {
+        match self.cell_at(i)? {
+            Value::Int(v) => Ok(*v),
+            Value::Null => Ok(0),
+            v => Err(DomainError::internal(format!(
+                "col {i}: expected int, got {v:?}"
+            ))),
+        }
+    }
+    pub fn get_str_at(&self, i: usize) -> DResult<String> {
+        match self.cell_at(i)? {
+            Value::Text(s) => Ok(s.clone()),
+            v => Err(DomainError::internal(format!(
+                "col {i}: expected text, got {v:?}"
+            ))),
         }
     }
 }
@@ -101,6 +177,12 @@ pub trait Session {
     /// Convenience: at most one row.
     fn query_opt(&mut self, sql: &str, params: &[Value]) -> DResult<Option<Row>> {
         Ok(self.query(sql, params)?.into_iter().next())
+    }
+
+    /// Convenience: exactly one row (for aggregates / `SELECT <scalar>`).
+    fn query_one(&mut self, sql: &str, params: &[Value]) -> DResult<Row> {
+        self.query_opt(sql, params)?
+            .ok_or_else(|| DomainError::internal("query returned no rows"))
     }
 }
 
@@ -135,6 +217,14 @@ mod native {
     use rusqlite::types::{ToSqlOutput, ValueRef};
     use rusqlite::{Connection, ToSql};
     use std::sync::{Arc, Mutex, MutexGuard};
+
+    impl From<rusqlite::Error> for DomainError {
+        fn from(e: rusqlite::Error) -> Self {
+            // Carries SQLite's own text — trigger `RAISE(ABORT)` strings and FTS
+            // `MATCH` syntax errors — which `classify` maps to the right code.
+            DomainError::from_db_message(e.to_string())
+        }
+    }
 
     impl ToSql for Value {
         fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {

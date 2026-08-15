@@ -14,7 +14,7 @@ use tokio::net::TcpListener;
 async fn spawn_server() -> (FlowServiceClient<tonic::transport::Channel>, u16) {
     let conn = db::open(":memory:").expect("db");
     db::seed(&conn).expect("seed");
-    let store: DynStore = std::sync::Arc::new(NativeStore::new(SqliteStore::new(conn)));
+    let store: DynStore = std::sync::Arc::new(NativeStore::new(SqliteStore::open(conn)));
     let svc = FlowServiceServer::new(FlowImpl::new(store));
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");

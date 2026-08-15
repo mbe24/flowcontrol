@@ -6,13 +6,13 @@
 use flowd::db;
 use flowd::error::Code;
 use flowd::generated::flow_v1 as pb;
-use flowd::store::SqliteStore;
+use flowd::store::{Core, SqliteStore};
 use prost::Message;
 
-fn seeded() -> SqliteStore {
+fn seeded() -> Core {
     let conn = db::open(":memory:").expect("db open");
     db::seed(&conn).expect("seed");
-    SqliteStore::new(conn)
+    SqliteStore::open(conn)
 }
 
 fn meta() -> Option<pb::WriteMeta> {
@@ -65,8 +65,8 @@ fn create_node_then_snapshot_sees_it() {
 
 #[test]
 fn search_works_through_dispatch_fts5() {
-    // Proves FTS5 is reachable via the dispatch path (the same code that compiles
-    // to wasm with sqlite-wasm-rs, which also ships FTS5).
+    // Proves FTS5 is reachable via the dispatch path — the same `dispatch` code the
+    // wasm host drives over its own SQLite (node:sqlite), which also ships FTS5.
     let s = seeded();
     let req = pb::SearchRequest {
         project_id: "prj-travel".into(),

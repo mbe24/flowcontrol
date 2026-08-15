@@ -1,34 +1,24 @@
-//! The synchronous SQLite store — the heart of `flowcore`, target-agnostic and
-//! wasm-compilable (no tokio, no tonic here).
+//! The synchronous store — the heart of `flowcore`, target-agnostic and
+//! wasm-compilable (no tokio, no tonic, no direct rusqlite here).
 //!
-//! Each public `*_locked` method takes a single `Mutex<Connection>` and runs one
-//! operation to completion (no `.await`). The native `flowd` edge wraps these in
-//! `spawn_blocking` + an async trait; the wasm host calls [`SqliteStore::dispatch`]
-//! directly. Single-writer ordering matches the actual load (a local, single-user
-//! daemon) and is shared by every host.
+//! Written against the [`Sql`] seam (`crate::sql`): each public `*_locked` method
+//! opens one [`Session`] (which holds the connection lock for its whole duration),
+//! reads, runs writes inside one [`transaction`], and returns — no `.await`. The
+//! native edge wraps these in `spawn_blocking`; the wasm host calls [`SqliteStore::dispatch`].
+//! The same code runs over rusqlite (native / self-contained wasm) or a
+//! host-imported driver (Node `node:sqlite`, browser `sqlite-wasm`).
 //!
-//! Every mutation runs inside one transaction (`unchecked_transaction`, which
-//! rolls back on `Drop` unless committed). Errors carry a [`DomainError`] whose
-//! `Code` is classified from the message, preserving one taxonomy across hosts.
+//! Errors carry a [`DomainError`] whose `Code` is classified from the message,
+//! preserving one taxonomy across hosts.
 
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
-
-use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::error::DomainError;
 use crate::generated::flow_v1 as pb;
+use crate::sql::{transaction, Row, Session, Sql, Value};
+use crate::values;
 
 type DResult<T> = Result<T, DomainError>;
-
-impl From<rusqlite::Error> for DomainError {
-    fn from(e: rusqlite::Error) -> Self {
-        // The message carries SQLite's own text — including trigger `RAISE(ABORT)`
-        // strings ("would create a cycle", "invalid parent kind") and FTS `MATCH`
-        // syntax errors — which `classify` maps to the right code.
-        DomainError::from_db_message(e.to_string())
-    }
-}
 
 impl From<serde_json::Error> for DomainError {
     fn from(e: serde_json::Error) -> Self {
@@ -48,20 +38,16 @@ fn effective_status(s: &str) -> i32 {
     }
 }
 
-/// SQLite-backed store. Cheap to clone: wraps an `Arc<Mutex<Connection>>`.
-/// Synchronous and target-agnostic — no notifier here (Watch fan-out is a native
-/// concern owned by `flowd`'s edge, which reads the returned `Mutation`).
+/// SQLite-backed store, generic over the [`Sql`] driver. Cheap to clone.
 #[derive(Clone)]
-pub struct SqliteStore {
-    conn: Arc<Mutex<Connection>>,
+pub struct SqliteStore<S: Sql> {
+    sql: S,
 }
 
-impl SqliteStore {
-    /// Wrap an already-migrated connection.
-    pub fn new(conn: Connection) -> Self {
-        Self {
-            conn: Arc::new(Mutex::new(conn)),
-        }
+impl<S: Sql> SqliteStore<S> {
+    /// Wrap a driver.
+    pub fn new(sql: S) -> Self {
+        Self { sql }
     }
 
     /// A mutation with no events/nodes, carrying only a cursor. Returned for an
@@ -76,85 +62,91 @@ impl SqliteStore {
     }
 }
 
-/// Synchronous store logic. Each `*_locked` method takes the connection lock and
-/// runs one operation to completion (no `.await`). `flowd`'s async edge offloads
-/// each onto `spawn_blocking`; the wasm host calls `dispatch` (below).
-impl SqliteStore {
+/// Native convenience: build a store from a rusqlite connection.
+#[cfg(not(target_arch = "wasm32"))]
+impl SqliteStore<crate::sql::RusqliteSql> {
+    pub fn open(conn: rusqlite::Connection) -> Self {
+        Self::new(crate::sql::RusqliteSql::new(conn))
+    }
+}
+
+impl<S: Sql> SqliteStore<S> {
     pub fn list_projects_locked(&self, include_archived: bool) -> DResult<Vec<pb::Project>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
+        let mut s = self.sql.session()?;
+        s.query(
             "SELECT id, name, description, COALESCE(archived_at,0) AS archived_at, created_at
              FROM projects
              WHERE ?1 = 1 OR archived_at IS NULL
              ORDER BY created_at",
-        )?;
-        let rows = stmt.query_map(params![include_archived], row_to_project)?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+            values![include_archived],
+        )?
+        .iter()
+        .map(row_to_project)
+        .collect()
     }
 
     pub fn get_snapshot_locked(&self, project_id: &str) -> DResult<pb::GetSnapshotResponse> {
-        let conn = self.conn.lock().unwrap();
+        let mut s = self.sql.session()?;
 
-        // Project (may be absent).
-        let project = conn
-            .query_row(
+        let project = s
+            .query_opt(
                 "SELECT id, name, description, COALESCE(archived_at,0) AS archived_at, created_at
                  FROM projects WHERE id = ?1",
-                params![project_id],
-                row_to_project,
-            )
-            .optional()?;
+                values![project_id],
+            )?
+            .map(|r| row_to_project(&r))
+            .transpose()?;
 
-        // Nodes with effective status from the node_state view.
-        let mut nodes = {
-            let mut stmt = conn.prepare(
+        let mut nodes: Vec<pb::Node> = s
+            .query(
                 "SELECT n.id, n.project_id, COALESCE(n.parent_id,'') AS parent_id,
                         n.kind, n.title, n.description, n.condition, n.note, COALESCE(n.reference,'') AS reference,
                         n.declared_status, n.wp_state, n.position, n.created_at, n.updated_at,
                         n.status AS effective_status
                  FROM node_state n
                  WHERE n.project_id = ?1",
-            )?;
-            let rows = stmt.query_map(params![project_id], row_to_node)?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()?
-        };
+                values![project_id],
+            )?
+            .iter()
+            .map(row_to_node)
+            .collect::<DResult<Vec<_>>>()?;
         for node in &mut nodes {
-            node.verification = verification_for(&conn, &node.id)?;
+            node.verification = verification_for(&mut *s, &node.id)?;
         }
 
-        // Dependencies for the project.
-        let dependencies = {
-            let mut stmt = conn.prepare(
+        let dependencies: Vec<pb::Dependency> = s
+            .query(
                 "SELECT d.blocker_id, d.blocked_id
                  FROM dependencies d
                  JOIN nodes a ON a.id = d.blocker_id
                  JOIN nodes b ON b.id = d.blocked_id
                  WHERE a.project_id = ?1 AND b.project_id = ?1",
-            )?;
-            let rows = stmt.query_map(params![project_id], |r| {
+                values![project_id],
+            )?
+            .iter()
+            .map(|r| {
                 Ok(pb::Dependency {
-                    blocker_id: r.get("blocker_id")?,
-                    blocked_id: r.get("blocked_id")?,
+                    blocker_id: r.get_str("blocker_id")?,
+                    blocked_id: r.get_str("blocked_id")?,
                 })
-            })?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()?
-        };
+            })
+            .collect::<DResult<Vec<_>>>()?;
 
-        // Progress per work package from the view.
-        let progress = progress_for(&conn, project_id)?;
+        let progress = progress_for(&mut *s, project_id)?;
 
-        // Recent events (limit 25) + current seq.
-        let recent_events = {
-            let mut stmt = conn.prepare(
+        let recent_events: Vec<pb::Event> = s
+            .query(
                 "SELECT seq, project_id, COALESCE(node_id,'') AS node_id, kind, author, summary, payload AS payload_json, created_at
                  FROM events WHERE project_id = ?1
                  ORDER BY seq DESC LIMIT 25",
-            )?;
-            let rows = stmt.query_map(params![project_id], proto_event)?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()?
-        };
-        let seq: i64 =
-            conn.query_row("SELECT COALESCE(MAX(seq),0) FROM events", [], |r| r.get(0))?;
+                values![project_id],
+            )?
+            .iter()
+            .map(proto_event)
+            .collect::<DResult<Vec<_>>>()?;
+        let seq = s
+            .query_one("SELECT COALESCE(MAX(seq),0) FROM events", values![])?
+            .get_i64_at(0)?;
 
         Ok(pb::GetSnapshotResponse {
             project,
@@ -167,14 +159,16 @@ impl SqliteStore {
     }
 
     pub fn events_after_locked(&self, project_id: &str, from_seq: i64) -> DResult<Vec<pb::Event>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
+        let mut s = self.sql.session()?;
+        s.query(
             "SELECT seq, project_id, COALESCE(node_id,'') AS node_id, kind, author, summary, payload AS payload_json, created_at
              FROM events WHERE project_id = ?1 AND seq > ?2
              ORDER BY seq ASC",
-        )?;
-        let rows = stmt.query_map(params![project_id, from_seq], proto_event)?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+            values![project_id, from_seq],
+        )?
+        .iter()
+        .map(proto_event)
+        .collect()
     }
 
     pub fn poll_changes_locked(
@@ -184,17 +178,17 @@ impl SqliteStore {
         limit: i32,
     ) -> DResult<pb::PollChangesResponse> {
         let lim = if limit <= 0 { 1000 } else { limit };
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT seq, project_id, COALESCE(node_id,'') AS node_id, kind, author, summary, payload AS payload_json, created_at
-             FROM events WHERE project_id = ?1 AND seq > ?2
-             ORDER BY seq ASC LIMIT ?3",
-        )?;
-        let events = stmt
-            .query_map(params![project_id, after_seq, lim], proto_event)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        // Next cursor: the last event returned, or the caller's cursor if nothing
-        // new (never skip events on the next poll).
+        let mut s = self.sql.session()?;
+        let events: Vec<pb::Event> = s
+            .query(
+                "SELECT seq, project_id, COALESCE(node_id,'') AS node_id, kind, author, summary, payload AS payload_json, created_at
+                 FROM events WHERE project_id = ?1 AND seq > ?2
+                 ORDER BY seq ASC LIMIT ?3",
+                values![project_id, after_seq, lim],
+            )?
+            .iter()
+            .map(proto_event)
+            .collect::<DResult<Vec<_>>>()?;
         let seq = events.last().map(|e| e.seq).unwrap_or(after_seq);
         Ok(pb::PollChangesResponse { events, seq })
     }
@@ -207,23 +201,20 @@ impl SqliteStore {
         limit: i32,
     ) -> DResult<(Vec<pb::Event>, bool)> {
         let lim = limit.max(1);
-        let conn = self.conn.lock().unwrap();
-        // Fetch one extra to tell whether an older page exists. An empty node_id
-        // means "no node filter"; before_seq 0 means "from the newest".
-        let mut stmt = conn.prepare(
-            "SELECT seq, project_id, COALESCE(node_id,'') AS node_id, kind, author, summary, payload AS payload_json, created_at
-             FROM events
-             WHERE project_id = ?1
-               AND (?2 = '' OR node_id = ?2)
-               AND (?3 = 0 OR seq < ?3)
-             ORDER BY seq DESC LIMIT ?4",
-        )?;
-        let mut rows = stmt
-            .query_map(
-                params![project_id, node_id, before_seq, lim + 1],
-                proto_event,
+        let mut s = self.sql.session()?;
+        let mut rows: Vec<pb::Event> = s
+            .query(
+                "SELECT seq, project_id, COALESCE(node_id,'') AS node_id, kind, author, summary, payload AS payload_json, created_at
+                 FROM events
+                 WHERE project_id = ?1
+                   AND (?2 = '' OR node_id = ?2)
+                   AND (?3 = 0 OR seq < ?3)
+                 ORDER BY seq DESC LIMIT ?4",
+                values![project_id, node_id, before_seq, lim + 1],
             )?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
+            .iter()
+            .map(proto_event)
+            .collect::<DResult<Vec<_>>>()?;
         let has_more = rows.len() as i32 > lim;
         rows.truncate(lim as usize);
         Ok((rows, has_more))
@@ -235,9 +226,9 @@ impl SqliteStore {
         query: &str,
         limit: i32,
     ) -> DResult<Vec<pb::Node>> {
-        let conn = self.conn.lock().unwrap();
-        let mut nodes = {
-            let mut stmt = conn.prepare(
+        let mut s = self.sql.session()?;
+        let mut nodes: Vec<pb::Node> = s
+            .query(
                 "SELECT n.id, n.project_id, COALESCE(n.parent_id,'') AS parent_id,
                         n.kind, n.title, n.description, n.condition, n.note, COALESCE(n.reference,'') AS reference,
                         n.declared_status, n.wp_state, n.position, n.created_at, n.updated_at,
@@ -247,25 +238,24 @@ impl SqliteStore {
                  JOIN nodes_fts f ON f.rowid = n.rowid
                  WHERE n.project_id = ?1 AND nodes_fts MATCH ?2
                  ORDER BY rank LIMIT ?3",
-            )?;
-            let rows = stmt.query_map(params![project_id, query, limit.max(1)], row_to_node)?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()?
-        };
+                values![project_id, query, limit.max(1)],
+            )?
+            .iter()
+            .map(row_to_node)
+            .collect::<DResult<Vec<_>>>()?;
         for node in &mut nodes {
-            node.verification = verification_for(&conn, &node.id)?;
+            node.verification = verification_for(&mut *s, &node.id)?;
         }
         Ok(nodes)
     }
 
     pub fn create_node_locked(&self, req: pb::CreateNodeRequest) -> DResult<pb::Mutation> {
-        let conn = self.conn.lock().unwrap();
+        let mut s = self.sql.session()?;
         if let Some(hit) =
-            check_idempotency_created(&conn, &req.project_id, idem_key(req.meta.as_ref()))?
+            check_idempotency_created(&mut *s, &req.project_id, idem_key(req.meta.as_ref()))?
         {
-            // Replay: return the node the original request created, so a retry
-            // (e.g. an agent after a timeout) still learns the id.
             if let Some(eid) = &hit.entity_id {
-                if let Some(n) = fetch_node(&conn, eid)? {
+                if let Some(n) = fetch_node(&mut *s, eid)? {
                     return Ok(pb::Mutation {
                         events: vec![],
                         changed_nodes: vec![n],
@@ -282,141 +272,145 @@ impl SqliteStore {
         } else {
             None
         };
-        let tx = conn.unchecked_transaction()?;
-        let node_id = new_id(&tx, "node")?;
-        tx.execute(
-            "INSERT INTO nodes (id, project_id, parent_id, kind, title, description, condition, note, reference, declared_status, wp_state, position)
-             VALUES (?1, ?2, NULLIF(?3, ''), ?4, ?5, ?6, ?7, ?8, NULLIF(?9, ''), 'OPEN', ?10, ?11)",
-            params![
-                node_id, req.project_id, req.parent_id, kind_str(req.kind), req.title,
-                req.description, req.condition, req.note, req.reference, wp, req.position
-            ],
-        )?;
-        let payload =
-            serde_json::json!({ "after": { "id": &node_id, "title": &req.title } }).to_string();
-        let event = append_event(
-            &tx,
-            &req.project_id,
-            &node_id,
-            "NODE_CREATED",
-            &author,
-            &format!("created {}", node_id),
-            &payload,
-        )?;
-        record_idempotency_created(
-            &tx,
-            &req.project_id,
-            idem_key(req.meta.as_ref()),
-            event.seq,
-            &node_id,
-        )?;
-        tx.commit()?;
-        finish_mutation(&conn, &req.project_id, vec![event], vec![node_id])
+        let project_id = req.project_id.clone();
+        let (event, node_id) = transaction(&mut *s, |s| {
+            let node_id = new_id(s, "node")?;
+            s.execute(
+                "INSERT INTO nodes (id, project_id, parent_id, kind, title, description, condition, note, reference, declared_status, wp_state, position)
+                 VALUES (?1, ?2, NULLIF(?3, ''), ?4, ?5, ?6, ?7, ?8, NULLIF(?9, ''), 'OPEN', ?10, ?11)",
+                values![
+                    &node_id, &req.project_id, &req.parent_id, kind_str(req.kind), &req.title,
+                    &req.description, &req.condition, &req.note, &req.reference, wp, req.position
+                ],
+            )?;
+            let payload =
+                serde_json::json!({ "after": { "id": &node_id, "title": &req.title } }).to_string();
+            let event = append_event(
+                s,
+                &req.project_id,
+                &node_id,
+                "NODE_CREATED",
+                &author,
+                &format!("created {}", node_id),
+                &payload,
+            )?;
+            record_idempotency_created(
+                s,
+                &req.project_id,
+                idem_key(req.meta.as_ref()),
+                event.seq,
+                &node_id,
+            )?;
+            Ok((event, node_id))
+        })?;
+        finish_mutation(&mut *s, &project_id, vec![event], vec![node_id])
     }
 
     pub fn update_node_locked(&self, req: pb::UpdateNodeRequest) -> DResult<pb::Mutation> {
-        let conn = self.conn.lock().unwrap();
-        let current = fetch_node(&conn, &req.node_id)?
+        let mut s = self.sql.session()?;
+        let current = fetch_node(&mut *s, &req.node_id)?
             .ok_or_else(|| DomainError::from_db_message("node not found"))?;
         let project_id = current.project_id.clone();
-        if let Some(seq) = check_idempotency(&conn, &project_id, idem_key(req.meta.as_ref()))? {
+        if let Some(seq) = check_idempotency(&mut *s, &project_id, idem_key(req.meta.as_ref()))? {
             return Ok(Self::empty_mutation(seq));
         }
         if req.update_mask.is_empty() {
             return Err(DomainError::from_db_message("update_mask cannot be empty"));
         }
-        let tx = conn.unchecked_transaction()?;
-        for f in &req.update_mask {
-            match f.as_str() {
-                "title" => {
-                    tx.execute(
-                        "UPDATE nodes SET title = ?1 WHERE id = ?2",
-                        params![req.title, req.node_id],
-                    )?;
-                }
-                "description" => {
-                    tx.execute(
-                        "UPDATE nodes SET description = ?1 WHERE id = ?2",
-                        params![req.description, req.node_id],
-                    )?;
-                }
-                "condition" => {
-                    tx.execute(
-                        "UPDATE nodes SET condition = ?1 WHERE id = ?2",
-                        params![req.condition, req.node_id],
-                    )?;
-                }
-                "position" => {
-                    tx.execute(
-                        "UPDATE nodes SET position = ?1 WHERE id = ?2",
-                        params![req.position, req.node_id],
-                    )?;
-                }
-                "reference" => {
-                    tx.execute(
-                        "UPDATE nodes SET reference = ?1 WHERE id = ?2",
-                        params![req.reference, req.node_id],
-                    )?;
-                }
-                "note" => {
-                    tx.execute(
-                        "UPDATE nodes SET note = ?1 WHERE id = ?2",
-                        params![req.note, req.node_id],
-                    )?;
-                }
-                "wp_state" => {
-                    tx.execute(
-                        "UPDATE nodes SET wp_state = ?1 WHERE id = ?2",
-                        params![wp_str(req.wp_state), req.node_id],
-                    )?;
-                }
-                other => {
-                    return Err(DomainError::from_db_message(format!(
-                        "unknown update_mask field: {}",
-                        other
-                    )))
+        let author = author_of(req.meta.as_ref());
+        let event = transaction(&mut *s, |s| {
+            for f in &req.update_mask {
+                match f.as_str() {
+                    "title" => {
+                        s.execute(
+                            "UPDATE nodes SET title = ?1 WHERE id = ?2",
+                            values![&req.title, &req.node_id],
+                        )?;
+                    }
+                    "description" => {
+                        s.execute(
+                            "UPDATE nodes SET description = ?1 WHERE id = ?2",
+                            values![&req.description, &req.node_id],
+                        )?;
+                    }
+                    "condition" => {
+                        s.execute(
+                            "UPDATE nodes SET condition = ?1 WHERE id = ?2",
+                            values![&req.condition, &req.node_id],
+                        )?;
+                    }
+                    "position" => {
+                        s.execute(
+                            "UPDATE nodes SET position = ?1 WHERE id = ?2",
+                            values![req.position, &req.node_id],
+                        )?;
+                    }
+                    "reference" => {
+                        s.execute(
+                            "UPDATE nodes SET reference = ?1 WHERE id = ?2",
+                            values![&req.reference, &req.node_id],
+                        )?;
+                    }
+                    "note" => {
+                        s.execute(
+                            "UPDATE nodes SET note = ?1 WHERE id = ?2",
+                            values![&req.note, &req.node_id],
+                        )?;
+                    }
+                    "wp_state" => {
+                        s.execute(
+                            "UPDATE nodes SET wp_state = ?1 WHERE id = ?2",
+                            values![wp_str(req.wp_state), &req.node_id],
+                        )?;
+                    }
+                    other => {
+                        return Err(DomainError::from_db_message(format!(
+                            "unknown update_mask field: {}",
+                            other
+                        )))
+                    }
                 }
             }
-        }
-        let author = author_of(req.meta.as_ref());
-        let event = append_event(
-            &tx,
-            &project_id,
-            &req.node_id,
-            "NODE_UPDATED",
-            &author,
-            &format!("updated {}", req.node_id),
-            "{}",
-        )?;
-        record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
-        tx.commit()?;
-        finish_mutation(&conn, &project_id, vec![event], vec![req.node_id.clone()])
+            let event = append_event(
+                s,
+                &project_id,
+                &req.node_id,
+                "NODE_UPDATED",
+                &author,
+                &format!("updated {}", req.node_id),
+                "{}",
+            )?;
+            record_idempotency(s, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
+            Ok(event)
+        })?;
+        finish_mutation(&mut *s, &project_id, vec![event], vec![req.node_id.clone()])
     }
 
     pub fn delete_node_locked(&self, req: pb::DeleteNodeRequest) -> DResult<pb::Mutation> {
-        let conn = self.conn.lock().unwrap();
-        let current = fetch_node(&conn, &req.node_id)?
+        let mut s = self.sql.session()?;
+        let current = fetch_node(&mut *s, &req.node_id)?
             .ok_or_else(|| DomainError::from_db_message("node not found"))?;
         let project_id = current.project_id.clone();
-        if let Some(seq) = check_idempotency(&conn, &project_id, idem_key(req.meta.as_ref()))? {
+        if let Some(seq) = check_idempotency(&mut *s, &project_id, idem_key(req.meta.as_ref()))? {
             return Ok(Self::empty_mutation(seq));
         }
         if req.fail_if_referenced {
-            let deps: i64 = conn.query_row(
-                "SELECT count(*) FROM dependencies WHERE blocker_id = ?1 OR blocked_id = ?1",
-                params![req.node_id],
-                |r| r.get(0),
-            )?;
+            let deps = s
+                .query_one(
+                    "SELECT count(*) FROM dependencies WHERE blocker_id = ?1 OR blocked_id = ?1",
+                    values![&req.node_id],
+                )?
+                .get_i64_at(0)?;
             if deps > 0 {
                 return Err(DomainError::from_db_message("node has dependents"));
             }
         }
         let before = node_before_json(&current);
         // Snapshot the whole subtree up front: the cascade delete removes children
-        // silently, so we must collect their EXTERNAL dependents (whose effective
-        // status may change) and emit a delete event per node before they vanish.
+        // silently, so collect their EXTERNAL dependents and emit a delete event
+        // per node before they vanish.
         let dependents = query_strings(
-            &conn,
+            &mut *s,
             "WITH RECURSIVE subtree(id) AS (
                  SELECT ?1 UNION ALL
                  SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id
@@ -424,118 +418,118 @@ impl SqliteStore {
              SELECT DISTINCT d.blocked_id FROM dependencies d
              JOIN subtree s ON d.blocker_id = s.id
              WHERE d.blocked_id NOT IN (SELECT id FROM subtree)",
-            params![req.node_id],
+            values![&req.node_id],
         )?;
         let descendants = query_strings(
-            &conn,
+            &mut *s,
             "WITH RECURSIVE subtree(id) AS (
                  SELECT ?1 UNION ALL
                  SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id
              )
              SELECT id FROM subtree WHERE id <> ?1",
-            params![req.node_id],
+            values![&req.node_id],
         )?;
 
         let author = author_of(req.meta.as_ref());
-        let tx = conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM nodes WHERE id = ?1", params![req.node_id])?;
-        // Every delete event carries node_id = '' (the row is gone; events.node_id
-        // has an FK). The root's `before` payload is what undo restores; children
-        // carry a minimal payload (a subtree delete is not child-wise undoable).
-        let mut events = Vec::with_capacity(descendants.len() + 1);
-        for cid in &descendants {
-            let payload = serde_json::json!({ "before": { "id": cid } }).to_string();
+        let events = transaction(&mut *s, |s| {
+            s.execute("DELETE FROM nodes WHERE id = ?1", values![&req.node_id])?;
+            let mut events = Vec::with_capacity(descendants.len() + 1);
+            for cid in &descendants {
+                let payload = serde_json::json!({ "before": { "id": cid } }).to_string();
+                events.push(append_event(
+                    s,
+                    &project_id,
+                    "",
+                    "NODE_DELETED",
+                    &author,
+                    &format!("deleted {}", cid),
+                    &payload,
+                )?);
+            }
             events.push(append_event(
-                &tx,
+                s,
                 &project_id,
                 "",
                 "NODE_DELETED",
                 &author,
-                &format!("deleted {}", cid),
-                &payload,
+                &format!("deleted {}", req.node_id),
+                &before,
             )?);
-        }
-        events.push(append_event(
-            &tx,
-            &project_id,
-            "",
-            "NODE_DELETED",
-            &author,
-            &format!("deleted {}", req.node_id),
-            &before,
-        )?);
-        let last_seq = events.last().map(|e| e.seq).unwrap_or(0);
-        record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), last_seq)?;
-        tx.commit()?;
-        finish_mutation(&conn, &project_id, events, dependents)
+            let last_seq = events.last().map(|e| e.seq).unwrap_or(0);
+            record_idempotency(s, &project_id, idem_key(req.meta.as_ref()), last_seq)?;
+            Ok(events)
+        })?;
+        finish_mutation(&mut *s, &project_id, events, dependents)
     }
 
     pub fn set_status_locked(&self, req: pb::SetStatusRequest) -> DResult<pb::Mutation> {
-        let conn = self.conn.lock().unwrap();
-        let current = fetch_node(&conn, &req.node_id)?
+        let mut s = self.sql.session()?;
+        let current = fetch_node(&mut *s, &req.node_id)?
             .ok_or_else(|| DomainError::from_db_message("node not found"))?;
         let project_id = current.project_id.clone();
-        if let Some(seq) = check_idempotency(&conn, &project_id, idem_key(req.meta.as_ref()))? {
+        if let Some(seq) = check_idempotency(&mut *s, &project_id, idem_key(req.meta.as_ref()))? {
             return Ok(Self::empty_mutation(seq));
         }
         let before = declared_str(current.declared_status);
         let new = declared_str(req.declared_status);
         let dependents = query_strings(
-            &conn,
+            &mut *s,
             "SELECT blocked_id FROM dependencies WHERE blocker_id = ?1",
-            params![req.node_id],
+            values![&req.node_id],
         )?;
         let author = author_of(req.meta.as_ref());
-        let tx = conn.unchecked_transaction()?;
-        tx.execute(
-            "UPDATE nodes SET declared_status = ?1 WHERE id = ?2",
-            params![new, req.node_id],
-        )?;
-        let payload = serde_json::json!({ "before": before, "after": new }).to_string();
-        let event = append_event(
-            &tx,
-            &project_id,
-            &req.node_id,
-            "STATUS_SET",
-            &author,
-            &format!("{} -> {}", req.node_id, new),
-            &payload,
-        )?;
-        record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
-        tx.commit()?;
+        let event = transaction(&mut *s, |s| {
+            s.execute(
+                "UPDATE nodes SET declared_status = ?1 WHERE id = ?2",
+                values![new, &req.node_id],
+            )?;
+            let payload = serde_json::json!({ "before": before, "after": new }).to_string();
+            let event = append_event(
+                s,
+                &project_id,
+                &req.node_id,
+                "STATUS_SET",
+                &author,
+                &format!("{} -> {}", req.node_id, new),
+                &payload,
+            )?;
+            record_idempotency(s, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
+            Ok(event)
+        })?;
         let mut affected = vec![req.node_id.clone()];
         affected.extend(dependents);
-        finish_mutation(&conn, &project_id, vec![event], affected)
+        finish_mutation(&mut *s, &project_id, vec![event], affected)
     }
 
     pub fn add_dependency_locked(&self, req: pb::AddDependencyRequest) -> DResult<pb::Mutation> {
-        let conn = self.conn.lock().unwrap();
-        let project_id = project_of(&conn, &req.blocker_id)?;
-        if let Some(seq) = check_idempotency(&conn, &project_id, idem_key(req.meta.as_ref()))? {
+        let mut s = self.sql.session()?;
+        let project_id = project_of(&mut *s, &req.blocker_id)?;
+        if let Some(seq) = check_idempotency(&mut *s, &project_id, idem_key(req.meta.as_ref()))? {
             return Ok(Self::empty_mutation(seq));
         }
         let author = author_of(req.meta.as_ref());
-        let tx = conn.unchecked_transaction()?;
-        tx.execute(
-            "INSERT OR IGNORE INTO dependencies (blocker_id, blocked_id) VALUES (?1, ?2)",
-            params![req.blocker_id, req.blocked_id],
-        )?;
-        let payload =
-            serde_json::json!({ "blocker_id": &req.blocker_id, "blocked_id": &req.blocked_id })
-                .to_string();
-        let event = append_event(
-            &tx,
-            &project_id,
-            "",
-            "DEP_ADDED",
-            &author,
-            &format!("{} blocks {}", req.blocker_id, req.blocked_id),
-            &payload,
-        )?;
-        record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
-        tx.commit()?;
+        let event = transaction(&mut *s, |s| {
+            s.execute(
+                "INSERT OR IGNORE INTO dependencies (blocker_id, blocked_id) VALUES (?1, ?2)",
+                values![&req.blocker_id, &req.blocked_id],
+            )?;
+            let payload =
+                serde_json::json!({ "blocker_id": &req.blocker_id, "blocked_id": &req.blocked_id })
+                    .to_string();
+            let event = append_event(
+                s,
+                &project_id,
+                "",
+                "DEP_ADDED",
+                &author,
+                &format!("{} blocks {}", req.blocker_id, req.blocked_id),
+                &payload,
+            )?;
+            record_idempotency(s, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
+            Ok(event)
+        })?;
         finish_mutation(
-            &conn,
+            &mut *s,
             &project_id,
             vec![event],
             vec![req.blocked_id.clone()],
@@ -546,33 +540,34 @@ impl SqliteStore {
         &self,
         req: pb::RemoveDependencyRequest,
     ) -> DResult<pb::Mutation> {
-        let conn = self.conn.lock().unwrap();
-        let project_id = project_of(&conn, &req.blocker_id)?;
-        if let Some(seq) = check_idempotency(&conn, &project_id, idem_key(req.meta.as_ref()))? {
+        let mut s = self.sql.session()?;
+        let project_id = project_of(&mut *s, &req.blocker_id)?;
+        if let Some(seq) = check_idempotency(&mut *s, &project_id, idem_key(req.meta.as_ref()))? {
             return Ok(Self::empty_mutation(seq));
         }
         let author = author_of(req.meta.as_ref());
-        let tx = conn.unchecked_transaction()?;
-        tx.execute(
-            "DELETE FROM dependencies WHERE blocker_id = ?1 AND blocked_id = ?2",
-            params![req.blocker_id, req.blocked_id],
-        )?;
-        let payload =
-            serde_json::json!({ "blocker_id": &req.blocker_id, "blocked_id": &req.blocked_id })
-                .to_string();
-        let event = append_event(
-            &tx,
-            &project_id,
-            "",
-            "DEP_REMOVED",
-            &author,
-            &format!("{} no longer blocks {}", req.blocker_id, req.blocked_id),
-            &payload,
-        )?;
-        record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
-        tx.commit()?;
+        let event = transaction(&mut *s, |s| {
+            s.execute(
+                "DELETE FROM dependencies WHERE blocker_id = ?1 AND blocked_id = ?2",
+                values![&req.blocker_id, &req.blocked_id],
+            )?;
+            let payload =
+                serde_json::json!({ "blocker_id": &req.blocker_id, "blocked_id": &req.blocked_id })
+                    .to_string();
+            let event = append_event(
+                s,
+                &project_id,
+                "",
+                "DEP_REMOVED",
+                &author,
+                &format!("{} no longer blocks {}", req.blocker_id, req.blocked_id),
+                &payload,
+            )?;
+            record_idempotency(s, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
+            Ok(event)
+        })?;
         finish_mutation(
-            &conn,
+            &mut *s,
             &project_id,
             vec![event],
             vec![req.blocked_id.clone()],
@@ -583,11 +578,11 @@ impl SqliteStore {
         &self,
         req: pb::ReportConditionRequest,
     ) -> DResult<pb::Mutation> {
-        let conn = self.conn.lock().unwrap();
-        let current = fetch_node(&conn, &req.node_id)?
+        let mut s = self.sql.session()?;
+        let current = fetch_node(&mut *s, &req.node_id)?
             .ok_or_else(|| DomainError::from_db_message("node not found"))?;
         let project_id = current.project_id.clone();
-        if let Some(seq) = check_idempotency(&conn, &project_id, idem_key(req.meta.as_ref()))? {
+        if let Some(seq) = check_idempotency(&mut *s, &project_id, idem_key(req.meta.as_ref()))? {
             return Ok(Self::empty_mutation(seq));
         }
         let result = match req.result {
@@ -596,87 +591,87 @@ impl SqliteStore {
             _ => return Err(DomainError::from_db_message("invalid agent result")),
         };
         let author = author_of(req.meta.as_ref());
-        let tx = conn.unchecked_transaction()?;
-        tx.execute(
-            "INSERT INTO verifications (node_id, agent_result, agent_name, agent_at, agent_node_rev, agent_detail)
-             VALUES (?1, ?2, ?3, unixepoch(), (SELECT updated_at FROM nodes WHERE id = ?1), ?4)
-             ON CONFLICT(node_id) DO UPDATE SET
-               agent_result = excluded.agent_result,
-               agent_name   = excluded.agent_name,
-               agent_at     = excluded.agent_at,
-               agent_node_rev = excluded.agent_node_rev,
-               agent_detail = excluded.agent_detail",
-            params![req.node_id, result, author, req.detail],
-        )?;
-        let payload = serde_json::json!({ "result": result, "detail": &req.detail }).to_string();
-        let event = append_event(
-            &tx,
-            &project_id,
-            &req.node_id,
-            "AGENT_REPORTED",
-            &author,
-            &format!("agent reported {} on {}", result, req.node_id),
-            &payload,
-        )?;
-        record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
-        tx.commit()?;
-        finish_mutation(&conn, &project_id, vec![event], vec![req.node_id.clone()])
+        let event = transaction(&mut *s, |s| {
+            s.execute(
+                "INSERT INTO verifications (node_id, agent_result, agent_name, agent_at, agent_node_rev, agent_detail)
+                 VALUES (?1, ?2, ?3, unixepoch(), (SELECT updated_at FROM nodes WHERE id = ?1), ?4)
+                 ON CONFLICT(node_id) DO UPDATE SET
+                   agent_result = excluded.agent_result,
+                   agent_name   = excluded.agent_name,
+                   agent_at     = excluded.agent_at,
+                   agent_node_rev = excluded.agent_node_rev,
+                   agent_detail = excluded.agent_detail",
+                values![&req.node_id, result, &author, &req.detail],
+            )?;
+            let payload =
+                serde_json::json!({ "result": result, "detail": &req.detail }).to_string();
+            let event = append_event(
+                s,
+                &project_id,
+                &req.node_id,
+                "AGENT_REPORTED",
+                &author,
+                &format!("agent reported {} on {}", result, req.node_id),
+                &payload,
+            )?;
+            record_idempotency(s, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
+            Ok(event)
+        })?;
+        finish_mutation(&mut *s, &project_id, vec![event], vec![req.node_id.clone()])
     }
 
     pub fn set_verdict_locked(&self, req: pb::SetVerdictRequest) -> DResult<pb::Mutation> {
-        let conn = self.conn.lock().unwrap();
-        let current = fetch_node(&conn, &req.node_id)?
+        let mut s = self.sql.session()?;
+        let current = fetch_node(&mut *s, &req.node_id)?
             .ok_or_else(|| DomainError::from_db_message("node not found"))?;
         let project_id = current.project_id.clone();
-        if let Some(seq) = check_idempotency(&conn, &project_id, idem_key(req.meta.as_ref()))? {
+        if let Some(seq) = check_idempotency(&mut *s, &project_id, idem_key(req.meta.as_ref()))? {
             return Ok(Self::empty_mutation(seq));
         }
         let author = author_of(req.meta.as_ref());
-        let tx = conn.unchecked_transaction()?;
-        match req.verdict {
-            1 => {
-                tx.execute(
-                    "INSERT INTO verifications (node_id, human_verdict, human_at)
-                     VALUES (?1, 'ACCEPTED', unixepoch())
-                     ON CONFLICT(node_id) DO UPDATE SET human_verdict = 'ACCEPTED', human_at = unixepoch()",
-                    params![req.node_id],
-                )?;
+        let event = transaction(&mut *s, |s| {
+            match req.verdict {
+                1 => {
+                    s.execute(
+                        "INSERT INTO verifications (node_id, human_verdict, human_at)
+                         VALUES (?1, 'ACCEPTED', unixepoch())
+                         ON CONFLICT(node_id) DO UPDATE SET human_verdict = 'ACCEPTED', human_at = unixepoch()",
+                        values![&req.node_id],
+                    )?;
+                }
+                2 => {
+                    s.execute(
+                        "INSERT INTO verifications (node_id, human_verdict, human_at)
+                         VALUES (?1, 'REJECTED', unixepoch())
+                         ON CONFLICT(node_id) DO UPDATE SET human_verdict = 'REJECTED', human_at = unixepoch()",
+                        values![&req.node_id],
+                    )?;
+                }
+                _ => {
+                    s.execute("UPDATE verifications SET human_verdict = NULL, human_at = NULL WHERE node_id = ?1", values![&req.node_id])?;
+                }
             }
-            2 => {
-                tx.execute(
-                    "INSERT INTO verifications (node_id, human_verdict, human_at)
-                     VALUES (?1, 'REJECTED', unixepoch())
-                     ON CONFLICT(node_id) DO UPDATE SET human_verdict = 'REJECTED', human_at = unixepoch()",
-                    params![req.node_id],
-                )?;
-            }
-            _ => {
-                tx.execute(
-                    "UPDATE verifications SET human_verdict = NULL, human_at = NULL WHERE node_id = ?1",
-                    params![req.node_id],
-                )?;
-            }
-        }
-        let event = append_event(
-            &tx,
-            &project_id,
-            &req.node_id,
-            "VERDICT_SET",
-            &author,
-            &format!("verdict set on {}", req.node_id),
-            "{}",
-        )?;
-        record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
-        tx.commit()?;
-        finish_mutation(&conn, &project_id, vec![event], vec![req.node_id.clone()])
+            let event = append_event(
+                s,
+                &project_id,
+                &req.node_id,
+                "VERDICT_SET",
+                &author,
+                &format!("verdict set on {}", req.node_id),
+                "{}",
+            )?;
+            record_idempotency(s, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
+            Ok(event)
+        })?;
+        finish_mutation(&mut *s, &project_id, vec![event], vec![req.node_id.clone()])
     }
 
     pub fn add_comment_locked(&self, req: pb::AddCommentRequest) -> DResult<pb::Mutation> {
-        let conn = self.conn.lock().unwrap();
-        let current = fetch_node(&conn, &req.node_id)?
+        let mut s = self.sql.session()?;
+        let current = fetch_node(&mut *s, &req.node_id)?
             .ok_or_else(|| DomainError::from_db_message("node not found"))?;
         let project_id = current.project_id.clone();
-        if let Some(seq) = check_idempotency(&conn, &project_id, idem_key(req.meta.as_ref()))? {
+        if let Some(seq) = check_idempotency(&mut *s, &project_id, idem_key(req.meta.as_ref()))? {
             return Ok(Self::empty_mutation(seq));
         }
         let author = author_of(req.meta.as_ref());
@@ -687,158 +682,155 @@ impl SqliteStore {
             req.text.clone()
         };
         let payload = serde_json::json!({ "text": &req.text, "author": &author }).to_string();
-        let tx = conn.unchecked_transaction()?;
-        let event = append_event(
-            &tx,
-            &project_id,
-            &req.node_id,
-            "COMMENT",
-            &author,
-            &summary,
-            &payload,
-        )?;
-        record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
-        tx.commit()?;
-        finish_mutation(&conn, &project_id, vec![event], vec![req.node_id.clone()])
+        let event = transaction(&mut *s, |s| {
+            let event = append_event(
+                s,
+                &project_id,
+                &req.node_id,
+                "COMMENT",
+                &author,
+                &summary,
+                &payload,
+            )?;
+            record_idempotency(s, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
+            Ok(event)
+        })?;
+        finish_mutation(&mut *s, &project_id, vec![event], vec![req.node_id.clone()])
     }
 
     pub fn undo_locked(&self, req: pb::UndoRequest) -> DResult<pb::Mutation> {
         const EV: &str = "SELECT seq, project_id, COALESCE(node_id,'') AS node_id, kind, author, summary, payload AS payload_json, created_at FROM events WHERE project_id = ?1 ";
-        let conn = self.conn.lock().unwrap();
+        let mut s = self.sql.session()?;
         let event = if req.seq > 0 {
-            conn.query_row(
+            s.query_opt(
                 &format!("{EV} AND seq = ?2"),
-                params![req.project_id, req.seq],
-                proto_event,
-            )
-            .optional()?
+                values![&req.project_id, req.seq],
+            )?
         } else {
-            conn.query_row(
+            s.query_opt(
                 &format!("{EV} ORDER BY seq DESC LIMIT 1"),
-                params![req.project_id],
-                proto_event,
-            )
-            .optional()?
-        };
-        let event = event.ok_or_else(|| DomainError::from_db_message("no event to undo"))?;
+                values![&req.project_id],
+            )?
+        }
+        .map(|r| proto_event(&r))
+        .transpose()?
+        .ok_or_else(|| DomainError::from_db_message("no event to undo"))?;
         let project_id = event.project_id.clone();
         let node_id = event.node_id.clone();
         let kind = event.kind;
-        if let Some(seq) = check_idempotency(&conn, &project_id, idem_key(req.meta.as_ref()))? {
+        if let Some(seq) = check_idempotency(&mut *s, &project_id, idem_key(req.meta.as_ref()))? {
             return Ok(Self::empty_mutation(seq));
         }
 
-        let tx = conn.unchecked_transaction()?;
-        // Reversing an event. `inverse_kind` is the valid schema kind that
-        // describes the reversal we just performed (the events table CHECK
-        // rejects a synthetic "UNDO" kind, so we record the reversed act).
-        let mut inverse_node = node_id.clone();
-        let (affected, inverse_kind, inverse_summary): (Vec<String>, &str, String) = match kind {
-            k if k == pb::EventKind::StatusSet as i32 => {
-                let before =
-                    payload_get(&event.payload_json, "before").unwrap_or_else(|| "OPEN".into());
-                tx.execute(
-                    "UPDATE nodes SET declared_status = ?1 WHERE id = ?2",
-                    params![before, node_id],
-                )?;
-                (
-                    downstream_of(&tx, &node_id)?,
-                    "STATUS_SET",
-                    format!("undid status set on {}", node_id),
-                )
-            }
-            k if k == pb::EventKind::DepAdded as i32 => {
-                let blocker = payload_get(&event.payload_json, "blocker_id")
-                    .ok_or_else(|| DomainError::from_db_message("dep payload missing blocker"))?;
-                let blocked = payload_get(&event.payload_json, "blocked_id")
-                    .ok_or_else(|| DomainError::from_db_message("dep payload missing blocked"))?;
-                tx.execute(
-                    "DELETE FROM dependencies WHERE blocker_id = ?1 AND blocked_id = ?2",
-                    params![blocker, blocked],
-                )?;
-                (
-                    vec![blocked.clone()],
-                    "DEP_REMOVED",
-                    format!("undid: {} no longer blocks {}", blocker, blocked),
-                )
-            }
-            k if k == pb::EventKind::DepRemoved as i32 => {
-                let blocker = payload_get(&event.payload_json, "blocker_id")
-                    .ok_or_else(|| DomainError::from_db_message("dep payload missing blocker"))?;
-                let blocked = payload_get(&event.payload_json, "blocked_id")
-                    .ok_or_else(|| DomainError::from_db_message("dep payload missing blocked"))?;
-                tx.execute(
-                    "INSERT OR IGNORE INTO dependencies (blocker_id, blocked_id) VALUES (?1, ?2)",
-                    params![blocker, blocked],
-                )?;
-                (
-                    vec![blocked.clone()],
-                    "DEP_ADDED",
-                    format!("undid: {} blocks {}", blocker, blocked),
-                )
-            }
-            k if k == pb::EventKind::NodeCreated as i32 => {
-                // The node no longer exists, so the inverse event must not
-                // reference it (the events.node_id FK would reject the row).
-                inverse_node.clear();
-                tx.execute("DELETE FROM nodes WHERE id = ?1", params![node_id])?;
-                (
-                    vec![],
-                    "NODE_DELETED",
-                    format!("undid creation of {}", node_id),
-                )
-            }
-            k if k == pb::EventKind::NodeDeleted as i32 => {
-                let before: serde_json::Value =
-                    serde_json::from_str(&event.payload_json).map_err(|_| {
+        let author = author_of(req.meta.as_ref());
+        let payload_json = event.payload_json.clone();
+        let (inverse, affected) = transaction(&mut *s, |s| {
+            // `inverse_kind` is the valid schema kind describing the reversal (the
+            // events CHECK rejects a synthetic "UNDO" kind, so we record the reversed act).
+            let mut inverse_node = node_id.clone();
+            let (affected, inverse_kind, inverse_summary): (Vec<String>, &str, String) = match kind
+            {
+                k if k == pb::EventKind::StatusSet as i32 => {
+                    let before =
+                        payload_get(&payload_json, "before").unwrap_or_else(|| "OPEN".into());
+                    s.execute(
+                        "UPDATE nodes SET declared_status = ?1 WHERE id = ?2",
+                        values![&before, &node_id],
+                    )?;
+                    (
+                        downstream_of(s, &node_id)?,
+                        "STATUS_SET",
+                        format!("undid status set on {}", node_id),
+                    )
+                }
+                k if k == pb::EventKind::DepAdded as i32 => {
+                    let blocker = payload_get(&payload_json, "blocker_id").ok_or_else(|| {
+                        DomainError::from_db_message("dep payload missing blocker")
+                    })?;
+                    let blocked = payload_get(&payload_json, "blocked_id").ok_or_else(|| {
+                        DomainError::from_db_message("dep payload missing blocked")
+                    })?;
+                    s.execute(
+                        "DELETE FROM dependencies WHERE blocker_id = ?1 AND blocked_id = ?2",
+                        values![&blocker, &blocked],
+                    )?;
+                    (
+                        vec![blocked.clone()],
+                        "DEP_REMOVED",
+                        format!("undid: {} no longer blocks {}", blocker, blocked),
+                    )
+                }
+                k if k == pb::EventKind::DepRemoved as i32 => {
+                    let blocker = payload_get(&payload_json, "blocker_id").ok_or_else(|| {
+                        DomainError::from_db_message("dep payload missing blocker")
+                    })?;
+                    let blocked = payload_get(&payload_json, "blocked_id").ok_or_else(|| {
+                        DomainError::from_db_message("dep payload missing blocked")
+                    })?;
+                    s.execute("INSERT OR IGNORE INTO dependencies (blocker_id, blocked_id) VALUES (?1, ?2)", values![&blocker, &blocked])?;
+                    (
+                        vec![blocked.clone()],
+                        "DEP_ADDED",
+                        format!("undid: {} blocks {}", blocker, blocked),
+                    )
+                }
+                k if k == pb::EventKind::NodeCreated as i32 => {
+                    inverse_node.clear();
+                    s.execute("DELETE FROM nodes WHERE id = ?1", values![&node_id])?;
+                    (
+                        vec![],
+                        "NODE_DELETED",
+                        format!("undid creation of {}", node_id),
+                    )
+                }
+                k if k == pb::EventKind::NodeDeleted as i32 => {
+                    let before: serde_json::Value =
+                        serde_json::from_str(&payload_json).map_err(|_| {
+                            DomainError::from_db_message("cannot undo delete: payload missing")
+                        })?;
+                    let obj = before.get("before").cloned().ok_or_else(|| {
                         DomainError::from_db_message("cannot undo delete: payload missing")
                     })?;
-                let obj = before.get("before").cloned().ok_or_else(|| {
-                    DomainError::from_db_message("cannot undo delete: payload missing")
-                })?;
-                restore_node(&tx, &obj)?;
-                (
-                    downstream_of(&tx, &node_id)?,
-                    "NODE_CREATED",
-                    format!("undid deletion of {}", node_id),
-                )
-            }
-            other => {
-                return Err(DomainError::from_db_message(format!(
-                    "cannot undo event kind {}",
-                    other
-                )))
-            }
-        };
-
-        let author = author_of(req.meta.as_ref());
-        let inverse = append_event(
-            &tx,
-            &project_id,
-            &inverse_node,
-            inverse_kind,
-            &author,
-            &inverse_summary,
-            "{}",
-        )?;
-        record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), inverse.seq)?;
-        tx.commit()?;
-        finish_mutation(&conn, &project_id, vec![inverse], affected)
+                    restore_node(s, &obj)?;
+                    (
+                        downstream_of(s, &node_id)?,
+                        "NODE_CREATED",
+                        format!("undid deletion of {}", node_id),
+                    )
+                }
+                other => {
+                    return Err(DomainError::from_db_message(format!(
+                        "cannot undo event kind {}",
+                        other
+                    )))
+                }
+            };
+            let inverse = append_event(
+                s,
+                &project_id,
+                &inverse_node,
+                inverse_kind,
+                &author,
+                &inverse_summary,
+                "{}",
+            )?;
+            record_idempotency(s, &project_id, idem_key(req.meta.as_ref()), inverse.seq)?;
+            Ok((inverse, affected))
+        })?;
+        finish_mutation(&mut *s, &project_id, vec![inverse], affected)
     }
 
     pub fn move_node_locked(&self, req: pb::MoveNodeRequest) -> DResult<pb::Mutation> {
-        let conn = self.conn.lock().unwrap();
-        let current = fetch_node(&conn, &req.node_id)?
+        let mut s = self.sql.session()?;
+        let current = fetch_node(&mut *s, &req.node_id)?
             .ok_or_else(|| DomainError::from_db_message("node not found"))?;
         let project_id = current.project_id.clone();
-        if let Some(seq) = check_idempotency(&conn, &project_id, idem_key(req.meta.as_ref()))? {
+        if let Some(seq) = check_idempotency(&mut *s, &project_id, idem_key(req.meta.as_ref()))? {
             return Ok(Self::empty_mutation(seq));
         }
         let old_kind = current.kind;
         let new_kind = req.kind;
         let wp = pb::NodeKind::WorkPackage as i32;
-        // Structural validation: scope to STEP<->TASK + reparent; the trigger
-        // backstops parent-kind / cross-project / self-parent / children-validity.
         if new_kind == pb::NodeKind::Unspecified as i32 {
             return Err(DomainError::from_db_message("move requires a target kind"));
         }
@@ -853,192 +845,182 @@ impl SqliteStore {
             ));
         }
         let author = author_of(req.meta.as_ref());
+        let parent_id_before = current.parent_id.clone();
+        let (events, affected) = transaction(&mut *s, |s| {
+            let mut events: Vec<pb::Event> = Vec::new();
+            let mut affected = vec![req.node_id.clone()];
 
-        let tx = conn.unchecked_transaction()?;
-        let mut events: Vec<pb::Event> = Vec::new();
-        let mut affected = vec![req.node_id.clone()];
-
-        // TASK -> STEP demote drops this node's step children (destructive, no
-        // undo — consented at the client). Collect each child's dependents BEFORE
-        // deleting, then write the NODE_DELETED events with node_id = ''.
-        if old_kind == pb::NodeKind::Task as i32 && new_kind == pb::NodeKind::Step as i32 {
-            let child_ids = query_strings(
-                &tx,
-                "SELECT id FROM nodes WHERE parent_id = ?1",
-                params![req.node_id],
-            )?;
-            for cid in &child_ids {
-                let deps = query_strings(
-                    &tx,
-                    "SELECT blocked_id FROM dependencies WHERE blocker_id = ?1",
-                    params![cid],
+            // TASK -> STEP demote drops this node's step children (destructive).
+            // Collect each child's dependents BEFORE deleting; delete events use node_id = ''.
+            if old_kind == pb::NodeKind::Task as i32 && new_kind == pb::NodeKind::Step as i32 {
+                let child_ids = query_strings(
+                    s,
+                    "SELECT id FROM nodes WHERE parent_id = ?1",
+                    values![&req.node_id],
                 )?;
-                affected.extend(deps);
-                tx.execute("DELETE FROM nodes WHERE id = ?1", params![cid])?;
-                let payload = serde_json::json!({ "before": { "id": cid } }).to_string();
-                events.push(append_event(
-                    &tx,
-                    &project_id,
-                    "",
-                    "NODE_DELETED",
-                    &author,
-                    &format!("deleted {}", cid),
-                    &payload,
-                )?);
+                for cid in &child_ids {
+                    let deps = query_strings(
+                        s,
+                        "SELECT blocked_id FROM dependencies WHERE blocker_id = ?1",
+                        values![cid],
+                    )?;
+                    affected.extend(deps);
+                    s.execute("DELETE FROM nodes WHERE id = ?1", values![cid])?;
+                    let payload = serde_json::json!({ "before": { "id": cid } }).to_string();
+                    events.push(append_event(
+                        s,
+                        &project_id,
+                        "",
+                        "NODE_DELETED",
+                        &author,
+                        &format!("deleted {}", cid),
+                        &payload,
+                    )?);
+                }
             }
-        }
 
-        // A kind change invalidates the verification: a STEP must not carry a
-        // TASK's agent badge (and vice versa).
-        if old_kind != new_kind {
-            tx.execute(
-                "DELETE FROM verifications WHERE node_id = ?1",
-                params![req.node_id],
+            // A kind change invalidates the verification.
+            if old_kind != new_kind {
+                s.execute(
+                    "DELETE FROM verifications WHERE node_id = ?1",
+                    values![&req.node_id],
+                )?;
+            }
+
+            let new_pos = s
+                .query_one(
+                    "SELECT COALESCE(MAX(position), 0) + 100 FROM nodes WHERE parent_id = ?1",
+                    values![&req.parent_id],
+                )?
+                .get_i64_at(0)?;
+            s.execute(
+                "UPDATE nodes SET parent_id = NULLIF(?1, ''), kind = ?2, position = ?3 WHERE id = ?4",
+                values![&req.parent_id, kind_str(new_kind), new_pos as i32, &req.node_id],
             )?;
-        }
 
-        // Append into the new parent's sibling list.
-        let new_pos: i64 = tx.query_row(
-            "SELECT COALESCE(MAX(position), 0) + 100 FROM nodes WHERE parent_id = ?1",
-            params![req.parent_id],
-            |r| r.get(0),
-        )?;
+            let payload = serde_json::json!({
+                "before": { "parent_id": &parent_id_before, "kind": kind_str(old_kind) },
+                "after": { "parent_id": &req.parent_id, "kind": kind_str(new_kind) }
+            })
+            .to_string();
+            events.push(append_event(
+                s,
+                &project_id,
+                &req.node_id,
+                "NODE_UPDATED",
+                &author,
+                &format!("moved {}", req.node_id),
+                &payload,
+            )?);
 
-        tx.execute(
-            "UPDATE nodes SET parent_id = NULLIF(?1, ''), kind = ?2, position = ?3 WHERE id = ?4",
-            params![
-                req.parent_id,
-                kind_str(new_kind),
-                new_pos as i32,
-                req.node_id
-            ],
-        )?;
-
-        let payload = serde_json::json!({
-            "before": { "parent_id": &current.parent_id, "kind": kind_str(old_kind) },
-            "after": { "parent_id": &req.parent_id, "kind": kind_str(new_kind) }
-        })
-        .to_string();
-        events.push(append_event(
-            &tx,
-            &project_id,
-            &req.node_id,
-            "NODE_UPDATED",
-            &author,
-            &format!("moved {}", req.node_id),
-            &payload,
-        )?);
-
-        let last_seq = events.last().map(|e| e.seq).unwrap_or(0);
-        record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), last_seq)?;
-        tx.commit()?;
-        finish_mutation(&conn, &project_id, events, affected)
+            let last_seq = events.last().map(|e| e.seq).unwrap_or(0);
+            record_idempotency(s, &project_id, idem_key(req.meta.as_ref()), last_seq)?;
+            Ok((events, affected))
+        })?;
+        finish_mutation(&mut *s, &project_id, events, affected)
     }
 
     pub fn create_project_locked(&self, req: pb::CreateProjectRequest) -> DResult<pb::Project> {
-        let conn = self.conn.lock().unwrap();
-        // Sentinel-scoped idempotency ('' scope): projects log no event and the id
-        // is minted here, so a retry dedups under '' and returns the created row.
-        if let Some(hit) = check_idempotency_created(&conn, "", idem_key(req.meta.as_ref()))? {
+        let mut s = self.sql.session()?;
+        // Sentinel-scoped idempotency ('' scope): projects log no event; a retry
+        // dedups under '' and returns the created row.
+        if let Some(hit) = check_idempotency_created(&mut *s, "", idem_key(req.meta.as_ref()))? {
             if let Some(pid) = &hit.entity_id {
-                if let Some(p) = fetch_project(&conn, pid)? {
+                if let Some(p) = fetch_project(&mut *s, pid)? {
                     return Ok(p);
                 }
             }
         }
-        let tx = conn.unchecked_transaction()?;
-        let id = new_id(&tx, "prj")?;
-        tx.execute(
-            "INSERT INTO projects (id, name, description) VALUES (?1, ?2, ?3)",
-            params![id, req.name, req.description],
-        )?;
-        record_idempotency_created(&tx, "", idem_key(req.meta.as_ref()), 0, &id)?;
-        tx.commit()?;
-        fetch_project(&conn, &id)?
+        let id = transaction(&mut *s, |s| {
+            let id = new_id(s, "prj")?;
+            s.execute(
+                "INSERT INTO projects (id, name, description) VALUES (?1, ?2, ?3)",
+                values![&id, &req.name, &req.description],
+            )?;
+            record_idempotency_created(s, "", idem_key(req.meta.as_ref()), 0, &id)?;
+            Ok(id)
+        })?;
+        fetch_project(&mut *s, &id)?
             .ok_or_else(|| DomainError::from_db_message("created project not found"))
     }
 
     pub fn update_project_locked(&self, req: pb::UpdateProjectRequest) -> DResult<pb::Project> {
-        let conn = self.conn.lock().unwrap();
-        if fetch_project(&conn, &req.project_id)?.is_none() {
+        let mut s = self.sql.session()?;
+        if fetch_project(&mut *s, &req.project_id)?.is_none() {
             return Err(DomainError::from_db_message("project not found"));
         }
         if req.update_mask.is_empty() {
             return Err(DomainError::from_db_message("update_mask cannot be empty"));
         }
-        let tx = conn.unchecked_transaction()?;
-        for f in &req.update_mask {
-            match f.as_str() {
-                "name" => {
-                    tx.execute(
-                        "UPDATE projects SET name = ?1 WHERE id = ?2",
-                        params![req.name, req.project_id],
-                    )?;
-                }
-                "description" => {
-                    tx.execute(
-                        "UPDATE projects SET description = ?1 WHERE id = ?2",
-                        params![req.description, req.project_id],
-                    )?;
-                }
-                other => {
-                    return Err(DomainError::from_db_message(format!(
-                        "unknown update_mask field: {}",
-                        other
-                    )))
+        transaction(&mut *s, |s| {
+            for f in &req.update_mask {
+                match f.as_str() {
+                    "name" => {
+                        s.execute(
+                            "UPDATE projects SET name = ?1 WHERE id = ?2",
+                            values![&req.name, &req.project_id],
+                        )?;
+                    }
+                    "description" => {
+                        s.execute(
+                            "UPDATE projects SET description = ?1 WHERE id = ?2",
+                            values![&req.description, &req.project_id],
+                        )?;
+                    }
+                    other => {
+                        return Err(DomainError::from_db_message(format!(
+                            "unknown update_mask field: {}",
+                            other
+                        )))
+                    }
                 }
             }
-        }
-        tx.execute(
-            "UPDATE projects SET updated_at = unixepoch() WHERE id = ?1",
-            params![req.project_id],
-        )?;
-        tx.commit()?;
-        fetch_project(&conn, &req.project_id)?
+            s.execute(
+                "UPDATE projects SET updated_at = unixepoch() WHERE id = ?1",
+                values![&req.project_id],
+            )?;
+            Ok(())
+        })?;
+        fetch_project(&mut *s, &req.project_id)?
             .ok_or_else(|| DomainError::from_db_message("project not found"))
     }
 
     pub fn archive_project_locked(&self, req: pb::ArchiveProjectRequest) -> DResult<pb::Project> {
-        let conn = self.conn.lock().unwrap();
-        if fetch_project(&conn, &req.project_id)?.is_none() {
+        let mut s = self.sql.session()?;
+        if fetch_project(&mut *s, &req.project_id)?.is_none() {
             return Err(DomainError::from_db_message("project not found"));
         }
-        let tx = conn.unchecked_transaction()?;
-        if req.archived {
-            tx.execute(
-                "UPDATE projects SET archived_at = unixepoch(), updated_at = unixepoch() WHERE id = ?1",
-                params![req.project_id],
-            )?;
-        } else {
-            tx.execute(
-                "UPDATE projects SET archived_at = NULL, updated_at = unixepoch() WHERE id = ?1",
-                params![req.project_id],
-            )?;
-        }
-        tx.commit()?;
-        fetch_project(&conn, &req.project_id)?
+        transaction(&mut *s, |s| {
+            if req.archived {
+                s.execute("UPDATE projects SET archived_at = unixepoch(), updated_at = unixepoch() WHERE id = ?1", values![&req.project_id])?;
+            } else {
+                s.execute("UPDATE projects SET archived_at = NULL, updated_at = unixepoch() WHERE id = ?1", values![&req.project_id])?;
+            }
+            Ok(())
+        })?;
+        fetch_project(&mut *s, &req.project_id)?
             .ok_or_else(|| DomainError::from_db_message("project not found"))
     }
 }
 
-impl SqliteStore {
+impl<S: Sql> SqliteStore<S> {
     /// Transport-agnostic entry point — "the service minus the socket". Decodes a
-    /// protobuf request for `method`, runs the synchronous store operation, and
-    /// returns the encoded protobuf response. The native tonic edge, the Node
-    /// host, and the browser all funnel through this one call; it is the seam the
-    /// wasm `#[wasm_bindgen]` facade wraps. Unary only — `Watch` streaming stays a
-    /// native-edge concern. `method` is the proto RPC name (e.g. "CreateNode").
+    /// protobuf request for `method`, runs the synchronous store op, and returns
+    /// the encoded response. The tonic edge, the Node host, and the browser all
+    /// funnel through this one call; the wasm `#[wasm_bindgen]` facade wraps it.
+    /// Unary only — `Watch` stays a native-edge concern.
     pub fn dispatch(&self, method: &str, req: &[u8]) -> DResult<Vec<u8>> {
         use prost::Message;
         fn decode<T: Message + Default>(bytes: &[u8]) -> DResult<T> {
             T::decode(bytes).map_err(|e| DomainError::invalid_argument(format!("bad request: {e}")))
         }
         Ok(match method {
-            // Reads
             "ListProjects" => {
                 let r: pb::ListProjectsRequest = decode(req)?;
-                let projects = self.list_projects_locked(r.include_archived)?;
-                pb::ListProjectsResponse { projects }.encode_to_vec()
+                pb::ListProjectsResponse {
+                    projects: self.list_projects_locked(r.include_archived)?,
+                }
+                .encode_to_vec()
             }
             "GetSnapshot" => {
                 let r: pb::GetSnapshotRequest = decode(req)?;
@@ -1052,15 +1034,16 @@ impl SqliteStore {
             }
             "Search" => {
                 let r: pb::SearchRequest = decode(req)?;
-                let nodes = self.search_locked(&r.project_id, &r.query, r.limit)?;
-                pb::SearchResponse { nodes }.encode_to_vec()
+                pb::SearchResponse {
+                    nodes: self.search_locked(&r.project_id, &r.query, r.limit)?,
+                }
+                .encode_to_vec()
             }
             "PollChanges" => {
                 let r: pb::PollChangesRequest = decode(req)?;
                 self.poll_changes_locked(&r.project_id, r.after_seq, r.limit)?
                     .encode_to_vec()
             }
-            // Writes (node/dep/status/etc. → Mutation)
             "CreateNode" => {
                 let m = self.create_node_locked(decode(req)?)?;
                 pb::CreateNodeResponse { mutation: Some(m) }.encode_to_vec()
@@ -1105,7 +1088,6 @@ impl SqliteStore {
                 let m = self.move_node_locked(decode(req)?)?;
                 pb::MoveNodeResponse { mutation: Some(m) }.encode_to_vec()
             }
-            // Project lifecycle → Project
             "CreateProject" => {
                 let p = self.create_project_locked(decode(req)?)?;
                 pb::CreateProjectResponse { project: Some(p) }.encode_to_vec()
@@ -1123,30 +1105,27 @@ impl SqliteStore {
     }
 }
 
-// ── shared write helpers (free fns over a &Connection; a &Transaction coerces) ─
+// ── shared helpers (free fns over a &mut dyn Session) ────────────────────────
 
 /// Build the shared mutation payload for a committed write. Watch fan-out is a
 /// native-edge concern: `flowd` reads the returned `Mutation` and publishes it.
 fn finish_mutation(
-    conn: &Connection,
+    s: &mut dyn Session,
     project_id: &str,
     events: Vec<pb::Event>,
     affected_ids: Vec<String>,
 ) -> DResult<pb::Mutation> {
     let seq = events.last().map(|e| e.seq).unwrap_or(0);
-
     let mut seen: HashSet<String> = HashSet::new();
     let mut changed_nodes = Vec::new();
     for id in affected_ids {
         if seen.insert(id.clone()) {
-            if let Some(n) = fetch_node(conn, &id)? {
+            if let Some(n) = fetch_node(&mut *s, &id)? {
                 changed_nodes.push(n);
             }
         }
     }
-
-    let changed_progress = progress_for(conn, project_id)?;
-
+    let changed_progress = progress_for(&mut *s, project_id)?;
     Ok(pb::Mutation {
         events,
         changed_nodes,
@@ -1156,46 +1135,45 @@ fn finish_mutation(
 }
 
 fn check_idempotency(
-    conn: &Connection,
+    s: &mut dyn Session,
     project_id: &str,
     key: Option<&str>,
 ) -> DResult<Option<i64>> {
     let Some(key) = key else { return Ok(None) };
-    Ok(conn
-        .query_row(
-            "SELECT seq FROM idempotency WHERE project_id = ?1 AND idempotency_key = ?2",
-            params![project_id, key],
-            |r| r.get(0),
-        )
-        .optional()?)
+    s.query_opt(
+        "SELECT seq FROM idempotency WHERE project_id = ?1 AND idempotency_key = ?2",
+        values![project_id, key],
+    )?
+    .map(|r| r.get_i64("seq"))
+    .transpose()
 }
 
 fn record_idempotency(
-    conn: &Connection,
+    s: &mut dyn Session,
     project_id: &str,
     key: Option<&str>,
     seq: i64,
 ) -> DResult<()> {
     let Some(key) = key else { return Ok(()) };
-    conn.execute(
+    s.execute(
         "INSERT OR IGNORE INTO idempotency (project_id, idempotency_key, seq) VALUES (?1, ?2, ?3)",
-        params![project_id, key, seq],
+        values![project_id, key, seq],
     )?;
     Ok(())
 }
 
-fn downstream_of(conn: &Connection, node_id: &str) -> DResult<Vec<String>> {
+fn downstream_of(s: &mut dyn Session, node_id: &str) -> DResult<Vec<String>> {
     query_strings(
-        conn,
+        s,
         "SELECT blocked_id FROM dependencies WHERE blocker_id = ?1",
-        params![node_id],
+        values![node_id],
     )
 }
 
 /// Progress per work package, counting leaves (steps where they exist, else the
 /// task itself) with the effective status of each leaf.
-fn progress_for(conn: &Connection, project_id: &str) -> DResult<Vec<pb::Progress>> {
-    let mut stmt = conn.prepare(
+fn progress_for(s: &mut dyn Session, project_id: &str) -> DResult<Vec<pb::Progress>> {
+    s.query(
         "SELECT t.parent_id AS wp_id,
                 count(*) AS total,
                 sum(l.status = 'DONE')     AS done,
@@ -1208,138 +1186,135 @@ fn progress_for(conn: &Connection, project_id: &str) -> DResult<Vec<pb::Progress
          WHERE t.kind = 'TASK' AND t.project_id = ?1
          GROUP BY t.parent_id
          ORDER BY t.parent_id",
-    )?;
-    let rows = stmt.query_map(params![project_id], |r| {
+        values![project_id],
+    )?
+    .iter()
+    .map(|r| {
         Ok(pb::Progress {
-            work_package_id: r.get::<_, String>("wp_id")?,
-            total: r.get::<_, i64>("total")? as i32,
-            done: r.get::<_, i64>("done")? as i32,
-            ready: r.get::<_, i64>("ready")? as i32,
-            blocked: r.get::<_, i64>("blocked")? as i32,
-            deferred: r.get::<_, i64>("deferred")? as i32,
+            work_package_id: r.get_str("wp_id")?,
+            total: r.get_i32("total")?,
+            done: r.get_i32("done")?,
+            ready: r.get_i32("ready")?,
+            blocked: r.get_i32("blocked")?,
+            deferred: r.get_i32("deferred")?,
         })
-    })?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    })
+    .collect()
 }
 
-fn verification_for(conn: &Connection, node_id: &str) -> DResult<Option<pb::Verification>> {
-    Ok(conn
-        .query_row(
-            "SELECT v.agent_result, COALESCE(v.agent_name,'') AS agent_name,
-                    COALESCE(v.agent_at,0) AS agent_at, v.agent_detail,
-                    v.human_verdict, COALESCE(v.human_at,0) AS human_at,
-                    (v.agent_node_rev IS NOT NULL AND n.updated_at > v.agent_node_rev) AS stale
-             FROM verifications v JOIN nodes n ON n.id = v.node_id
-             WHERE v.node_id = ?1",
-            params![node_id],
-            row_to_verification,
-        )
-        .optional()?)
+fn verification_for(s: &mut dyn Session, node_id: &str) -> DResult<Option<pb::Verification>> {
+    s.query_opt(
+        "SELECT v.agent_result, COALESCE(v.agent_name,'') AS agent_name,
+                COALESCE(v.agent_at,0) AS agent_at, v.agent_detail,
+                v.human_verdict, COALESCE(v.human_at,0) AS human_at,
+                (v.agent_node_rev IS NOT NULL AND n.updated_at > v.agent_node_rev) AS stale
+         FROM verifications v JOIN nodes n ON n.id = v.node_id
+         WHERE v.node_id = ?1",
+        values![node_id],
+    )?
+    .map(|r| row_to_verification(&r))
+    .transpose()
 }
 
 /// Fetch one node by id as a proto Node (None if missing).
-fn fetch_node(conn: &Connection, id: &str) -> DResult<Option<pb::Node>> {
-    let mut node = conn
-        .query_row(
+fn fetch_node(s: &mut dyn Session, id: &str) -> DResult<Option<pb::Node>> {
+    let mut node = s
+        .query_opt(
             "SELECT n.id, n.project_id, COALESCE(n.parent_id,'') AS parent_id,
                     n.kind, n.title, n.description, n.condition, n.note, COALESCE(n.reference,'') AS reference,
                     n.declared_status, n.wp_state, n.position, n.created_at, n.updated_at,
                     n.status AS effective_status
              FROM node_state n WHERE n.id = ?1",
-            params![id],
-            row_to_node,
-        )
-        .optional()?;
+            values![id],
+        )?
+        .map(|r| row_to_node(&r))
+        .transpose()?;
     if let Some(n) = &mut node {
-        n.verification = verification_for(conn, &n.id)?;
+        n.verification = verification_for(&mut *s, &n.id)?;
     }
     Ok(node)
 }
 
 /// Owning project of a node ('' if the node is unknown).
-fn project_of(conn: &Connection, node_id: &str) -> DResult<String> {
-    Ok(conn
-        .query_row(
-            "SELECT project_id FROM nodes WHERE id = ?1",
-            params![node_id],
-            |r| r.get::<_, String>(0),
-        )
-        .optional()?
-        .unwrap_or_default())
+fn project_of(s: &mut dyn Session, node_id: &str) -> DResult<String> {
+    Ok(s.query_opt(
+        "SELECT project_id FROM nodes WHERE id = ?1",
+        values![node_id],
+    )?
+    .map(|r| r.get_str("project_id"))
+    .transpose()?
+    .unwrap_or_default())
 }
 
 /// Fetch one project as a proto Project (None if missing).
-fn fetch_project(conn: &Connection, id: &str) -> DResult<Option<pb::Project>> {
-    Ok(conn
-        .query_row(
-            "SELECT id, name, description, COALESCE(archived_at,0) AS archived_at, created_at
-             FROM projects WHERE id = ?1",
-            params![id],
-            row_to_project,
-        )
-        .optional()?)
+fn fetch_project(s: &mut dyn Session, id: &str) -> DResult<Option<pb::Project>> {
+    s.query_opt(
+        "SELECT id, name, description, COALESCE(archived_at,0) AS archived_at, created_at
+         FROM projects WHERE id = ?1",
+        values![id],
+    )?
+    .map(|r| row_to_project(&r))
+    .transpose()
 }
 
 /// Idempotency lookup that also returns the id of the entity the original request
-/// created (for create replays). Used by create_node / create_project.
+/// created (for create replays).
 fn check_idempotency_created(
-    conn: &Connection,
+    s: &mut dyn Session,
     scope: &str,
     key: Option<&str>,
 ) -> DResult<Option<IdemHit>> {
     let Some(key) = key else { return Ok(None) };
-    Ok(conn
-        .query_row(
-            "SELECT seq, entity_id FROM idempotency WHERE project_id = ?1 AND idempotency_key = ?2",
-            params![scope, key],
-            |r| {
-                Ok(IdemHit {
-                    seq: r.get("seq")?,
-                    entity_id: r.get::<_, Option<String>>("entity_id")?,
-                })
-            },
-        )
-        .optional()?)
+    s.query_opt(
+        "SELECT seq, entity_id FROM idempotency WHERE project_id = ?1 AND idempotency_key = ?2",
+        values![scope, key],
+    )?
+    .map(|r| {
+        Ok(IdemHit {
+            seq: r.get_i64("seq")?,
+            entity_id: r.get_opt_str("entity_id")?,
+        })
+    })
+    .transpose()
 }
 
 /// Record an idempotency row that remembers the created entity's id.
 fn record_idempotency_created(
-    conn: &Connection,
+    s: &mut dyn Session,
     scope: &str,
     key: Option<&str>,
     seq: i64,
     entity_id: &str,
 ) -> DResult<()> {
     let Some(key) = key else { return Ok(()) };
-    conn.execute(
+    s.execute(
         "INSERT OR IGNORE INTO idempotency (project_id, idempotency_key, seq, entity_id) VALUES (?1, ?2, ?3, ?4)",
-        params![scope, key, seq, entity_id],
+        values![scope, key, seq, entity_id],
     )?;
     Ok(())
 }
 
 /// Run a query whose first column is text and collect it into a Vec.
-fn query_strings<P: rusqlite::Params>(conn: &Connection, sql: &str, p: P) -> DResult<Vec<String>> {
-    let mut stmt = conn.prepare(sql)?;
-    let rows = stmt.query_map(p, |r| r.get::<_, String>(0))?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+fn query_strings(s: &mut dyn Session, sql: &str, params: &[Value]) -> DResult<Vec<String>> {
+    s.query(sql, params)?
+        .iter()
+        .map(|r| r.get_str_at(0))
+        .collect()
 }
 
-/// Mint a short, sortable, unique id (`<prefix>-<unix-millis>-<8 hex>`) via SQL,
-/// so no host-clock/entropy API is needed — critical for the wasm target where
-/// `SystemTime::now()` panics and `RandomState` has no OS entropy.
-fn new_id(conn: &Connection, prefix: &str) -> DResult<String> {
-    Ok(conn.query_row(
+/// Mint a short, sortable, unique id (`<prefix>-<unix-millis>-<8 hex>`) via SQL —
+/// no host-clock/entropy API needed (wasm-safe).
+fn new_id(s: &mut dyn Session, prefix: &str) -> DResult<String> {
+    s.query_one(
         "SELECT ?1 || '-' || CAST(unixepoch('subsec') * 1000 AS INTEGER) || '-' || lower(hex(randomblob(4)))",
-        params![prefix],
-        |r| r.get::<_, String>(0),
-    )?)
+        values![prefix],
+    )?
+    .get_str_at(0)
 }
 
-/// Insert an event row; returns the fully-materialised `pb::Event`. `payload`
-/// must be valid JSON (the schema enforces it with a CHECK).
+/// Insert an event row (via `RETURNING`); returns the materialised `pb::Event`.
 fn append_event(
-    conn: &Connection,
+    s: &mut dyn Session,
     project_id: &str,
     node_id: &str,
     kind: &str,
@@ -1352,13 +1327,13 @@ fn append_event(
     } else {
         Some(node_id)
     };
-    Ok(conn.query_row(
+    let row = s.query_one(
         "INSERT INTO events (project_id, node_id, kind, author, summary, payload)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          RETURNING seq, project_id, COALESCE(node_id,'') AS node_id, kind, author, summary, payload AS payload_json, created_at",
-        params![project_id, node, kind, author, summary, payload],
-        proto_event,
-    )?)
+        values![project_id, node, kind, author, summary, payload],
+    )?;
+    proto_event(&row)
 }
 
 // ── free helpers ─────────────────────────────────────────────────────────────
@@ -1395,8 +1370,6 @@ fn payload_get(payload: &str, key: &str) -> Option<String> {
 
 /// Serialize enough of a node to re-insert it after a delete (undo).
 fn node_before_json(n: &pb::Node) -> String {
-    // Only WORK_PACKAGE rows carry a wp_state; the schema CHECK requires TASK/STEP
-    // rows to have NULL there, so leave it out for them.
     let wp = if n.kind == pb::NodeKind::WorkPackage as i32 {
         wp_str(n.wp_state)
     } else {
@@ -1422,16 +1395,16 @@ fn node_before_json(n: &pb::Node) -> String {
 }
 
 /// Re-insert a node from the `before` payload written by a delete.
-fn restore_node(conn: &Connection, obj: &serde_json::Value) -> DResult<()> {
+fn restore_node(s: &mut dyn Session, obj: &serde_json::Value) -> DResult<()> {
     let wp = if str_val(obj, "kind") == "WORK_PACKAGE" {
         wp_state_str(obj.get("wp_state").and_then(|v| v.as_str()))
     } else {
         None
     };
-    conn.execute(
+    s.execute(
         "INSERT OR IGNORE INTO nodes (id, project_id, parent_id, kind, title, description, condition, note, reference, declared_status, wp_state, position)
          VALUES (?1, ?2, NULLIF(?3, ''), ?4, ?5, ?6, ?7, ?8, NULLIF(?9, ''), ?10, ?11, ?12)",
-        params![
+        values![
             str_val(obj, "id"),
             str_val(obj, "project_id"),
             str_val(obj, "parent_id"),
@@ -1443,7 +1416,7 @@ fn restore_node(conn: &Connection, obj: &serde_json::Value) -> DResult<()> {
             str_val(obj, "reference"),
             declared_str_from(str_val(obj, "declared_status")),
             wp,
-            obj.get("position").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+            obj.get("position").and_then(|v| v.as_i64()).unwrap_or(0) as i32
         ],
     )?;
     Ok(())
@@ -1453,8 +1426,6 @@ fn str_val<'a>(obj: &'a serde_json::Value, key: &str) -> &'a str {
     obj.get(key).and_then(|v| v.as_str()).unwrap_or("")
 }
 
-/// Map a stored wp_state string back to a stored kind. Kept explicit so undo
-/// events survive the schema CHECK.
 fn wp_state_str(s: Option<&str>) -> Option<&'static str> {
     match s {
         Some("PLANNED") => Some("PLANNED"),
@@ -1498,83 +1469,80 @@ fn wp_str(w: i32) -> Option<&'static str> {
 }
 
 /// Convert a projects row into a proto Project.
-fn row_to_project(r: &Row) -> rusqlite::Result<pb::Project> {
+fn row_to_project(r: &Row) -> DResult<pb::Project> {
     Ok(pb::Project {
-        id: r.get("id")?,
-        name: r.get("name")?,
-        description: r.get("description")?,
-        archived_at: r.get("archived_at")?,
-        created_at: r.get("created_at")?,
+        id: r.get_str("id")?,
+        name: r.get_str("name")?,
+        description: r.get_str("description")?,
+        archived_at: r.get_i64("archived_at")?,
+        created_at: r.get_i64("created_at")?,
     })
 }
 
 /// Convert a node_state row into a proto Node.
-fn row_to_node(r: &Row) -> rusqlite::Result<pb::Node> {
-    let kind = match r.get::<_, String>("kind")?.as_str() {
+fn row_to_node(r: &Row) -> DResult<pb::Node> {
+    let kind = match r.get_str("kind")?.as_str() {
         "WORK_PACKAGE" => pb::NodeKind::WorkPackage,
         "TASK" => pb::NodeKind::Task,
         _ => pb::NodeKind::Step,
     };
-    let declared = match r.get::<_, String>("declared_status")?.as_str() {
+    let declared = match r.get_str("declared_status")?.as_str() {
         "DEFERRED" => pb::DeclaredStatus::Deferred,
         "DONE" => pb::DeclaredStatus::Done,
         _ => pb::DeclaredStatus::Open,
     };
-    let wp_state = match r.get::<_, Option<String>>("wp_state")? {
-        Some(s) if s == "ACTIVE" => pb::WorkPackageState::Active,
-        Some(s) if s == "DONE" => pb::WorkPackageState::Done,
-        Some(s) if s == "ARCHIVED" => pb::WorkPackageState::Archived,
+    let wp_state = match r.get_opt_str("wp_state")?.as_deref() {
+        Some("ACTIVE") => pb::WorkPackageState::Active,
+        Some("DONE") => pb::WorkPackageState::Done,
+        Some("ARCHIVED") => pb::WorkPackageState::Archived,
         _ => pb::WorkPackageState::Planned,
     };
     Ok(pb::Node {
-        id: r.get("id")?,
-        project_id: r.get("project_id")?,
-        parent_id: r.get("parent_id")?,
+        id: r.get_str("id")?,
+        project_id: r.get_str("project_id")?,
+        parent_id: r.get_str("parent_id")?,
         kind: kind as i32,
-        title: r.get("title")?,
-        description: r.get("description")?,
-        condition: r.get("condition")?,
-        note: r.get("note")?,
-        reference: r.get("reference")?,
+        title: r.get_str("title")?,
+        description: r.get_str("description")?,
+        condition: r.get_str("condition")?,
+        note: r.get_str("note")?,
+        reference: r.get_str("reference")?,
         declared_status: declared as i32,
-        status: effective_status(r.get::<_, String>("effective_status")?.as_str()),
+        status: effective_status(&r.get_str("effective_status")?),
         wp_state: wp_state as i32,
-        position: r.get("position")?,
+        position: r.get_i32("position")?,
         verification: None,
-        created_at: r.get("created_at")?,
-        updated_at: r.get("updated_at")?,
+        created_at: r.get_i64("created_at")?,
+        updated_at: r.get_i64("updated_at")?,
     })
 }
 
 /// Convert a verification row into a proto Verification.
-fn row_to_verification(r: &Row) -> rusqlite::Result<pb::Verification> {
-    let agent_result = match r.get::<_, Option<String>>("agent_result")?.as_deref() {
+fn row_to_verification(r: &Row) -> DResult<pb::Verification> {
+    let agent_result = match r.get_opt_str("agent_result")?.as_deref() {
         Some("PASS") => pb::AgentResult::Pass,
         Some("FAIL") => pb::AgentResult::Fail,
         _ => pb::AgentResult::Unspecified,
     };
-    let human_verdict = match r.get::<_, Option<String>>("human_verdict")?.as_deref() {
+    let human_verdict = match r.get_opt_str("human_verdict")?.as_deref() {
         Some("ACCEPTED") => pb::HumanVerdict::Accepted,
         Some("REJECTED") => pb::HumanVerdict::Rejected,
         _ => pb::HumanVerdict::Unspecified,
     };
     Ok(pb::Verification {
         agent_result: agent_result as i32,
-        agent_name: r.get("agent_name")?,
-        agent_at: r.get("agent_at")?,
-        agent_detail: r
-            .get::<_, Option<String>>("agent_detail")?
-            .unwrap_or_default(),
+        agent_name: r.get_str("agent_name")?,
+        agent_at: r.get_i64("agent_at")?,
+        agent_detail: r.get_opt_str("agent_detail")?.unwrap_or_default(),
         human_verdict: human_verdict as i32,
-        human_at: r.get("human_at")?,
-        stale: r.get::<_, i64>("stale")? != 0,
+        human_at: r.get_i64("human_at")?,
+        stale: r.get_i64("stale")? != 0,
     })
 }
 
-/// Map an events row to a proto `Event`. The `payload` column is aliased to
-/// `payload_json` in every SELECT.
-fn proto_event(r: &Row) -> rusqlite::Result<pb::Event> {
-    let kind = match r.get::<_, String>("kind")?.as_str() {
+/// Map an events row to a proto `Event`.
+fn proto_event(r: &Row) -> DResult<pb::Event> {
+    let kind = match r.get_str("kind")?.as_str() {
         "NODE_CREATED" => pb::EventKind::NodeCreated,
         "NODE_UPDATED" => pb::EventKind::NodeUpdated,
         "NODE_DELETED" => pb::EventKind::NodeDeleted,
@@ -1587,13 +1555,13 @@ fn proto_event(r: &Row) -> rusqlite::Result<pb::Event> {
         _ => pb::EventKind::Unspecified,
     };
     Ok(pb::Event {
-        seq: r.get("seq")?,
-        project_id: r.get("project_id")?,
-        node_id: r.get("node_id")?,
+        seq: r.get_i64("seq")?,
+        project_id: r.get_str("project_id")?,
+        node_id: r.get_str("node_id")?,
         kind: kind as i32,
-        author: r.get("author")?,
-        summary: r.get("summary")?,
-        payload_json: r.get("payload_json")?,
-        created_at: r.get("created_at")?,
+        author: r.get_str("author")?,
+        summary: r.get_str("summary")?,
+        payload_json: r.get_str("payload_json")?,
+        created_at: r.get_i64("created_at")?,
     })
 }

@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use flowcore::error::DomainError;
 use flowcore::generated::flow_v1 as pb;
+use flowcore::sql::RusqliteSql;
 use tokio::sync::broadcast;
 
 mod watch;
@@ -21,6 +22,9 @@ pub use watch::{Notified, Notifier};
 // Re-export the sync core so integration tests (and the dispatch path) can name it
 // without depending on `flowcore` directly.
 pub use flowcore::store::SqliteStore;
+
+/// The native store is always backed by rusqlite.
+pub type Core = SqliteStore<RusqliteSql>;
 
 /// The storage seam the gRPC layer depends on. Reads + mutations; every mutation
 /// returns its `Mutation` payload and (via the edge) publishes a `Notified` to
@@ -109,12 +113,12 @@ where
 /// The native store: `flowcore`'s sync core + a Watch notifier.
 #[derive(Clone)]
 pub struct NativeStore {
-    core: SqliteStore,
+    core: Core,
     notifier: Notifier,
 }
 
 impl NativeStore {
-    pub fn new(core: SqliteStore) -> Self {
+    pub fn new(core: Core) -> Self {
         let (notifier, _) = watch::channel(256);
         Self { core, notifier }
     }
@@ -156,13 +160,12 @@ macro_rules! write_pub {
 #[::async_trait::async_trait]
 impl Store for NativeStore {
     async fn list_projects(&self, include_archived: bool) -> Result<Vec<pb::Project>, DomainError> {
-        read!(self, move |c: &SqliteStore| c
+        read!(self, move |c: &Core| c
             .list_projects_locked(include_archived))
     }
     async fn get_snapshot(&self, project_id: &str) -> Result<pb::GetSnapshotResponse, DomainError> {
         let project_id = project_id.to_string();
-        read!(self, move |c: &SqliteStore| c
-            .get_snapshot_locked(&project_id))
+        read!(self, move |c: &Core| c.get_snapshot_locked(&project_id))
     }
     async fn events_after(
         &self,
@@ -170,7 +173,7 @@ impl Store for NativeStore {
         from_seq: i64,
     ) -> Result<Vec<pb::Event>, DomainError> {
         let project_id = project_id.to_string();
-        read!(self, move |c: &SqliteStore| c
+        read!(self, move |c: &Core| c
             .events_after_locked(&project_id, from_seq))
     }
     async fn poll_changes(
@@ -180,7 +183,7 @@ impl Store for NativeStore {
         limit: i32,
     ) -> Result<pb::PollChangesResponse, DomainError> {
         let project_id = project_id.to_string();
-        read!(self, move |c: &SqliteStore| c.poll_changes_locked(
+        read!(self, move |c: &Core| c.poll_changes_locked(
             &project_id,
             after_seq,
             limit
@@ -195,7 +198,7 @@ impl Store for NativeStore {
     ) -> Result<(Vec<pb::Event>, bool), DomainError> {
         let project_id = project_id.to_string();
         let node_id = node_id.to_string();
-        read!(self, move |c: &SqliteStore| c.list_events_locked(
+        read!(self, move |c: &Core| c.list_events_locked(
             &project_id,
             &node_id,
             before_seq,
@@ -210,7 +213,7 @@ impl Store for NativeStore {
     ) -> Result<Vec<pb::Node>, DomainError> {
         let project_id = project_id.to_string();
         let query = query.to_string();
-        read!(self, move |c: &SqliteStore| c.search_locked(
+        read!(self, move |c: &Core| c.search_locked(
             &project_id,
             &query,
             limit
