@@ -7,6 +7,7 @@
 
 pub mod db;
 pub mod error;
+pub mod sql;
 pub mod store;
 
 pub mod generated {
