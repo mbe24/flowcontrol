@@ -16,11 +16,9 @@ static RT: Lazy<tokio::runtime::Runtime> =
 
 // One seeded in-memory store, reused across iterations (cheap per-iteration cost).
 static STORE: Lazy<SqliteStore> = Lazy::new(|| {
-    RT.block_on(async {
-        let pool = db::open(":memory:").await.unwrap();
-        db::seed(&pool).await.unwrap();
-        SqliteStore::from_pool(pool)
-    })
+    let conn = db::open(":memory:").unwrap();
+    db::seed(&conn).unwrap();
+    SqliteStore::new(conn)
 });
 
 fuzz_target!(|data: &[u8]| {
