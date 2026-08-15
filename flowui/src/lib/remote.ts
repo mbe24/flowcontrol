@@ -51,7 +51,12 @@ const AUTHOR = 'you';
 const DEFAULT_BASE_URL = 'http://127.0.0.1:50051';
 
 function baseUrl(): string {
-  return import.meta.env.VITE_SERVER_URL || DEFAULT_BASE_URL;
+  // Explicit override wins (e.g. a team pointing at a shared daemon). Otherwise the
+  // SPA is served BY the daemon, so its own origin is the API — same-origin, which
+  // is the whole point of the transport design (no mixed content / CORS / certs).
+  if (import.meta.env.VITE_SERVER_URL) return import.meta.env.VITE_SERVER_URL;
+  if (typeof window !== 'undefined' && window.location?.origin) return window.location.origin;
+  return DEFAULT_BASE_URL;
 }
 
 function idemKey(): string {

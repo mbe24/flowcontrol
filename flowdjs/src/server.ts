@@ -1,7 +1,10 @@
-// The socket. connect-node serves Connect + gRPC + gRPC-web from one handler; an
-// http2 server with allowHTTP1 accepts both h2c gRPC (flowcli/flowmcp) and
-// HTTP/1.1 gRPC-web (flowui). CORS mirrors flowd's CorsLayer so the browser can call.
-import * as http2 from "node:http2";
+// The socket. One plain HTTP/1.1 server (http.createServer) serves everything the
+// browser needs same-origin: Connect + gRPC-web for the API, static assets for the
+// flowui SPA (via the adapter's `fallback`). HTTP/1.1 is deliberate — a browser
+// speaks it for the static bundle, and gRPC-web works over it; Node's h2c
+// `allowHTTP1` downgrade is unreliable, and native gRPC-over-h2 clients get a
+// separate UDS listener later (design.transport.md). CORS mirrors flowd's CorsLayer.
+import * as http from "node:http";
 
 import { cors } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
@@ -9,25 +12,28 @@ import { FlowService } from "@flow/api/flow/v1/flow_pb";
 
 import type { Bus } from "./bus";
 import { buildImpl } from "./service";
+import { staticHandler } from "./static";
 import type { Daemon } from "./store";
+
+type Fallback = NonNullable<Parameters<typeof connectNodeAdapter>[0]["fallback"]>;
+type NodeHandler = http.RequestListener;
 
 export function startServer(opts: {
   daemon: Daemon;
   bus: Bus;
   host: string;
   port: number;
-}): Promise<{ server: http2.Http2Server; port: number }> {
+  /** If set, serve the flowui SPA from this dir at every non-RPC path (same origin). */
+  uiDir?: string;
+}): Promise<{ server: http.Server; port: number }> {
   const adapter = connectNodeAdapter({
     routes: (router) => {
       router.service(FlowService, buildImpl(opts.daemon, opts.bus));
     },
+    // Non-RPC paths → the SPA (if a bundle dir was given).
+    fallback: opts.uiDir ? (staticHandler(opts.uiDir) as unknown as Fallback) : undefined
   });
-  // allowHTTP1 lets one h2 server accept both h2c gRPC and HTTP/1.1 grpc-web. It is
-  // valid at runtime but missing from @types/node's plain-server options.
-  const server = http2.createServer(
-    { allowHTTP1: true } as unknown as http2.ServerOptions,
-    withCors(adapter as unknown as NodeHandler),
-  );
+  const server = http.createServer(withCors(adapter as unknown as NodeHandler));
   return new Promise((resolve) => {
     server.listen(opts.port, opts.host, () => {
       const address = server.address();
@@ -37,12 +43,7 @@ export function startServer(opts: {
   });
 }
 
-type NodeHandler = (
-  req: http2.Http2ServerRequest,
-  res: http2.Http2ServerResponse,
-) => void;
-
-/** Add permissive CORS + preflight so browser grpc-web can reach the daemon. */
+/** Add permissive CORS + preflight so browser gRPC-web can reach the daemon. */
 function withCors(handler: NodeHandler): NodeHandler {
   const allowMethods = cors.allowedMethods.join(", ");
   const allowHeaders = [...cors.allowedHeaders, "Authorization"].join(", ");

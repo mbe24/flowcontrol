@@ -23,7 +23,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
-import { createGrpcTransport } from "@connectrpc/connect-node";
+import { createGrpcWebTransport } from "@connectrpc/connect-node";
 import { FlowService } from "@flow/api/flow/v1/flow_pb";
 
 export type SpawnedBy = "mcp" | "cli" | "user";
@@ -102,7 +102,10 @@ function portOf(addr: string): number | null {
  */
 export async function probe(addr: string, timeoutMs = 1500): Promise<boolean> {
   try {
-    const client = createClient(FlowService, createGrpcTransport({ baseUrl: addr }));
+    const client = createClient(
+      FlowService,
+      createGrpcWebTransport({ baseUrl: addr, httpVersion: "1.1" })
+    );
     await client.listProjects({ includeArchived: false }, { timeoutMs });
     return true;
   } catch (e) {

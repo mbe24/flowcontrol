@@ -6,6 +6,8 @@
 // Lifecycle (see plan/design.daemon-lifecycle.md): single-instance via session.json,
 // stable port+token across restarts so open flowui tabs reconnect. Started either
 // by a human (`flow ui`/flowcli — persists) or best-effort by flowmcp.
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import { Bus } from "./bus";
@@ -23,7 +25,8 @@ const { values } = parseArgs({
   options: {
     addr: { type: "string" },
     db: { type: "string" },
-    seed: { type: "boolean" }
+    seed: { type: "boolean" },
+    ui: { type: "string" }
   }
 });
 
@@ -44,14 +47,20 @@ if (live) {
 const { port: stablePort, token } = stablePortToken(DEFAULT_PORT);
 const [host, port] = explicit ? splitHostPort(explicit) : ["127.0.0.1", stablePort];
 
+// The flowui bundle to serve same-origin: --ui, FLOWUI_DIR, or the dev default.
+const uiCandidate =
+  values.ui ?? process.env.FLOWUI_DIR ?? fileURLToPath(new URL("../../flowui/dist", import.meta.url));
+const uiDir = existsSync(uiCandidate) ? uiCandidate : undefined;
+
 const daemon = createDaemon({ dbPath, seed });
 const bus = new Bus();
 
-const { server } = await startServer({ daemon, bus, host, port });
+const { server } = await startServer({ daemon, bus, host, port, uiDir });
 const addr = `http://${host}:${port}`;
 writeSession({ addr, token, pid: process.pid, startedAt: Date.now(), spawnedBy });
 console.error(
-  `[flowd.js] listening on ${host}:${port} (gRPC + grpc-web) — db ${dbPath} — spawned-by ${spawnedBy}`
+  `[flowd.js] listening on ${host}:${port} (gRPC + grpc-web) — db ${dbPath} — spawned-by ${spawnedBy}` +
+    (uiDir ? ` — serving flowui from ${uiDir}` : "")
 );
 
 const shutdown = () => {

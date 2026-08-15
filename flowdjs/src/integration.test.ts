@@ -7,7 +7,7 @@ import { join } from "node:path";
 
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
-import { createGrpcTransport } from "@connectrpc/connect-node";
+import { createGrpcWebTransport } from "@connectrpc/connect-node";
 import {
   CreateNodeRequestSchema,
   CreateNodeResponseSchema,
@@ -23,7 +23,7 @@ import { Bus } from "./bus";
 import { startServer } from "./server";
 import { createDaemon } from "./store";
 
-let server: import("node:http2").Http2Server;
+let server: import("node:http").Server;
 let client: ReturnType<typeof createClient<typeof FlowService>>;
 const daemon = createDaemon({ dbPath: ":memory:", seed: true });
 
@@ -32,7 +32,7 @@ beforeAll(async () => {
   server = started.server;
   client = createClient(
     FlowService,
-    createGrpcTransport({ baseUrl: `http://127.0.0.1:${started.port}` }),
+    createGrpcWebTransport({ baseUrl: `http://127.0.0.1:${started.port}`, httpVersion: "1.1" }),
   );
 });
 
