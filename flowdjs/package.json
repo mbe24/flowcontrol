@@ -1,0 +1,28 @@
+{
+  "name": "flowdjs",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "flowd.js — the FlowControl daemon as a Node process: flowcore (wasm) over node:sqlite, serving FlowService (gRPC + grpc-web). A drop-in for the Rust flowd.",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@flow/api": "0.1.0",
+    "@bufbuild/protobuf": "^2.13.0",
+    "@connectrpc/connect": "^2.1.2",
+    "@connectrpc/connect-node": "^2.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.10"
+  }
+}

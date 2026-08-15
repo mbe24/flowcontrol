@@ -6,6 +6,7 @@
   "workspaces": [
     "flowui",
     "flowmcp",
+    "flowdjs",
     "shared/flowapi"
   ],
   "scripts": {
@@ -15,6 +16,9 @@
     "dev:mcp": "npm run dev -w flowmcp",
     "test:mcp": "npm run test -w flowmcp",
     "typecheck:mcp": "npm run typecheck -w flowmcp",
+    "dev:flowdjs": "npm run dev -w flowdjs",
+    "test:flowdjs": "npm run test -w flowdjs",
+    "typecheck:flowdjs": "npm run typecheck -w flowdjs",
     "test:flowcli": "node scripts/runner.mjs test:flowcli"
   }
 }

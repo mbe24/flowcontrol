@@ -1,0 +1,5 @@
+node_modules/
+# Local daemon databases (durable WAL files).
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
