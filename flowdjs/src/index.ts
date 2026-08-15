@@ -55,7 +55,7 @@ const uiDir = existsSync(uiCandidate) ? uiCandidate : undefined;
 const daemon = createDaemon({ dbPath, seed });
 const bus = new Bus();
 
-const { server } = await startServer({ daemon, bus, host, port, uiDir });
+const { server } = await startServer({ daemon, bus, host, port, uiDir, token });
 const addr = `http://${host}:${port}`;
 writeSession({ addr, token, pid: process.pid, startedAt: Date.now(), spawnedBy });
 console.error(

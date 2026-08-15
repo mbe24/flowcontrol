@@ -85,7 +85,10 @@ export function clearSession(): void {
 export function stablePortToken(defaultPort: number): { port: number; token: string } {
   const prev = readSession();
   const port = prev ? portOf(prev.addr) ?? defaultPort : defaultPort;
-  const token = prev?.token ?? randomBytes(32).toString("base64url");
+  // FLOW_TOKEN lets a deployment (or a cross-boundary client like flowcli in WSL/a
+  // container, which can't read this session.json) share a provisioned token;
+  // otherwise reuse the prior session's, else mint a fresh one.
+  const token = process.env.FLOW_TOKEN ?? prev?.token ?? randomBytes(32).toString("base64url");
   return { port, token };
 }
 

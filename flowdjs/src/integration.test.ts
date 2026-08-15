@@ -99,6 +99,43 @@ test("Watch streams a live mutation", async () => {
   expect(received[0]?.events.length ?? 0).toBeGreaterThan(0);
 });
 
+test("RPCs require the bearer token when the daemon sets one", async () => {
+  const d = createDaemon({ dbPath: ":memory:", seed: true });
+  const started = await startServer({
+    daemon: d,
+    bus: new Bus(),
+    host: "127.0.0.1",
+    port: 0,
+    token: "sekret"
+  });
+  const baseUrl = `http://127.0.0.1:${started.port}`;
+  try {
+    // No credential → rejected.
+    const anon = createClient(FlowService, createGrpcWebTransport({ baseUrl, httpVersion: "1.1" }));
+    await expect(anon.listProjects({ includeArchived: false })).rejects.toThrow();
+
+    // With the token → allowed.
+    const authed = createClient(
+      FlowService,
+      createGrpcWebTransport({
+        baseUrl,
+        httpVersion: "1.1",
+        interceptors: [
+          (next) => (req) => {
+            req.header.set("Authorization", "Bearer sekret");
+            return next(req);
+          }
+        ]
+      })
+    );
+    const res = await authed.listProjects({ includeArchived: false });
+    expect(res.projects.map((p) => p.id)).toEqual(["prj-travel"]);
+  } finally {
+    started.server.close();
+    d.close();
+  }
+});
+
 test("a durable file DB survives a daemon restart", () => {
   const file = join(tmpdir(), `flowdjs-test-${process.pid}.sqlite`);
   const cleanup = () => {

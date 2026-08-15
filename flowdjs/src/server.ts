@@ -25,15 +25,18 @@ export function startServer(opts: {
   port: number;
   /** If set, serve the flowui SPA from this dir at every non-RPC path (same origin). */
   uiDir?: string;
+  /** If set, require `Authorization: Bearer <token>` on RPC calls, and inject it into
+   *  the served index.html so the same-origin SPA can send it. Omit to disable auth. */
+  token?: string;
 }): Promise<{ server: http.Server; port: number }> {
   const adapter = connectNodeAdapter({
     routes: (router) => {
       router.service(FlowService, buildImpl(opts.daemon, opts.bus));
     },
-    // Non-RPC paths → the SPA (if a bundle dir was given).
-    fallback: opts.uiDir ? (staticHandler(opts.uiDir) as unknown as Fallback) : undefined
+    // Non-RPC paths → the SPA (if a bundle dir was given); index.html gets the token.
+    fallback: opts.uiDir ? (staticHandler(opts.uiDir, opts.token) as unknown as Fallback) : undefined
   });
-  const server = http.createServer(withCors(adapter as unknown as NodeHandler));
+  const server = http.createServer(withGuards(adapter as unknown as NodeHandler, opts.token));
   return new Promise((resolve) => {
     server.listen(opts.port, opts.host, () => {
       const address = server.address();
@@ -95,7 +98,12 @@ function isAllowedOrigin(origin: string): boolean {
   }
 }
 
-function withCors(handler: NodeHandler): NodeHandler {
+// RPC calls live under this path prefix; static assets do not. Only RPCs are
+// token-gated (the page load can't carry a token yet — it receives it via the
+// injected <meta>).
+const RPC_PREFIX = `/${FlowService.typeName}/`;
+
+function withGuards(handler: NodeHandler, token?: string): NodeHandler {
   const allowMethods = cors.allowedMethods.join(", ");
   const allowHeaders = [...cors.allowedHeaders, "Authorization"].join(", ");
   const exposeHeaders = cors.exposedHeaders.join(", ");
@@ -122,6 +130,16 @@ function withCors(handler: NodeHandler): NodeHandler {
       res.writeHead(204);
       res.end();
       return;
+    }
+    // Bearer-token enforcement, RPC paths only (static assets + preflight exempt).
+    // This is the layer that stops a local process (or another user on a shared
+    // machine) driving the daemon; it can't read the 0600 session.json token.
+    if (token && (req.url ?? "").startsWith(RPC_PREFIX)) {
+      if (req.headers.authorization !== `Bearer ${token}`) {
+        res.statusCode = 401;
+        res.end("unauthorized");
+        return;
+      }
     }
     handler(req, res);
   };

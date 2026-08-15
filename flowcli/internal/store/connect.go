@@ -17,14 +17,28 @@ import (
 )
 
 // NewGRPC builds a Store that talks to a daemon over gRPC-web/HTTP-1.1. `baseURL`
-// may be a bare host:port (normalised to http://); `who` is the author byline
-// attached to every write.
-func NewGRPC(baseURL, who string) *GRPC {
+// may be a bare host:port (normalised to http://); `token` (may be empty) is the
+// bearer credential the daemon requires; `who` is the author byline on writes.
+func NewGRPC(baseURL, token, who string) *GRPC {
 	if !strings.Contains(baseURL, "://") {
 		baseURL = "http://" + baseURL
 	}
-	client := flowv1connect.NewFlowServiceClient(http.DefaultClient, baseURL, connect.WithGRPCWeb())
+	opts := []connect.ClientOption{connect.WithGRPCWeb()}
+	if token != "" {
+		opts = append(opts, connect.WithInterceptors(bearer(token)))
+	}
+	client := flowv1connect.NewFlowServiceClient(http.DefaultClient, baseURL, opts...)
 	return NewGRPCWithClient(&connectAdapter{c: client}, who)
+}
+
+// bearer attaches `Authorization: Bearer <token>` to every request.
+func bearer(token string) connect.UnaryInterceptorFunc {
+	return connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			req.Header().Set("Authorization", "Bearer "+token)
+			return next(ctx, req)
+		}
+	})
 }
 
 // connectAdapter adapts the connect-go client to the local flowClient seam,

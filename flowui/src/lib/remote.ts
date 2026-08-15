@@ -1,5 +1,5 @@
 import { create } from '@bufbuild/protobuf';
-import { createClient, type Client } from '@connectrpc/connect';
+import { createClient, type Client, type Interceptor } from '@connectrpc/connect';
 import { createGrpcWebTransport } from '@connectrpc/connect-web';
 import type { FlowStore, NewNode, NodePatch } from './store';
 import type {
@@ -57,6 +57,28 @@ function baseUrl(): string {
   if (import.meta.env.VITE_SERVER_URL) return import.meta.env.VITE_SERVER_URL;
   if (typeof window !== 'undefined' && window.location?.origin) return window.location.origin;
   return DEFAULT_BASE_URL;
+}
+
+/**
+ * The daemon serves the SPA and injects its bearer token into index.html as
+ * `<meta name="flow-token">`; we read it and authenticate every RPC. In dev
+ * (Vite-served, not injected) fall back to VITE_FLOW_TOKEN. Empty → no header
+ * (a daemon started without a token).
+ */
+function flowToken(): string {
+  if (typeof document !== 'undefined') {
+    const meta = document.querySelector('meta[name="flow-token"]');
+    const v = meta?.getAttribute('content');
+    if (v) return v;
+  }
+  return import.meta.env.VITE_FLOW_TOKEN ?? '';
+}
+
+function bearer(token: string): Interceptor {
+  return (next) => (req) => {
+    req.header.set('Authorization', `Bearer ${token}`);
+    return next(req);
+  };
 }
 
 function idemKey(): string {
@@ -272,8 +294,17 @@ export class RemoteStore implements FlowStore {
   private client: FlowServiceShim;
 
   constructor(client?: FlowServiceShim) {
+    const token = flowToken();
     this.client =
-      client ?? createClient(FlowService, createGrpcWebTransport({ baseUrl: baseUrl(), useBinaryFormat: true }));
+      client ??
+      createClient(
+        FlowService,
+        createGrpcWebTransport({
+          baseUrl: baseUrl(),
+          useBinaryFormat: true,
+          interceptors: token ? [bearer(token)] : []
+        })
+      );
   }
 
   private async snapshot(projectId: string) {

@@ -18,7 +18,7 @@ func TestIntegrationAgainstDaemon(t *testing.T) {
 	if addr == "" {
 		t.Skip("set FLOWCLI_IT_ADDR to run the live daemon integration test")
 	}
-	s := NewGRPC(addr, "flowcli-it")
+	s := NewGRPC(addr, os.Getenv("FLOWCLI_TOKEN"), "flowcli-it")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 

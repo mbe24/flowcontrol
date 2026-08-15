@@ -18,22 +18,24 @@ import { registerTools, type ToolDeps } from "./tools/registry";
  * which case the next client re-ensures; we fall back to the default addr and
  * serve degraded (see plan/design.daemon-lifecycle.md).
  */
-async function resolveAddr(): Promise<string> {
-  if (process.env.FLOWD_ADDR) return process.env.FLOWD_ADDR;
+async function resolveTarget(): Promise<{ addr: string; token: string }> {
+  if (process.env.FLOWD_ADDR) {
+    return { addr: process.env.FLOWD_ADDR, token: process.env.FLOWD_TOKEN ?? "" };
+  }
   try {
     const session = await ensureDaemon({ spawnedBy: "mcp", readyTimeoutMs: 6_000 });
     console.error(`[flowmcp] shared daemon at ${session.addr}`);
-    return session.addr;
+    return { addr: session.addr, token: session.token };
   } catch (e) {
     console.error(`[flowmcp] could not ensure a daemon (${String(e)}); serving degraded`);
-    return DEFAULT_FLOWD_ADDR;
+    return { addr: DEFAULT_FLOWD_ADDR, token: process.env.FLOWD_TOKEN ?? "" };
   }
 }
 
 void (async () => {
-  const addr = await resolveAddr();
+  const { addr, token } = await resolveTarget();
   const deps: ToolDeps = {
-    flow: createFlowClient(addr),
+    flow: createFlowClient(addr, token),
     callTimeoutMs: 10_000,
     author: process.env.FLOWMCP_AUTHOR ?? "flowmcp",
   };

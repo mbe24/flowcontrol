@@ -70,6 +70,9 @@ services:
     environment:
       FLOW_ALLOWED_HOSTS: "flowdjs:50051"
       FLOWD_HOME: /tmp/flowhome
+      # A provisioned token so the sibling container can authenticate (it can't read
+      # this container's session.json). Exercises the real bearer-token path.
+      FLOW_TOKEN: "it-shared-token"
     volumes:
       - type: bind
         source: ..
@@ -93,6 +96,7 @@ services:
     command: ["go", "test", "-run", "Integration", "-count=1", "-v", "./internal/store"]
     environment:
       FLOWCLI_IT_ADDR: "http://flowdjs:50051"
+      FLOWCLI_TOKEN: "it-shared-token"
     depends_on:
       flowdjs:
         condition: service_healthy
