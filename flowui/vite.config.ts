@@ -16,6 +16,10 @@ export default defineConfig(({ mode }) => {
       }
     ],
     server: { port: 5173 },
+    // sqlite-wasm ships its own .wasm and must not be pre-bundled/transformed by
+    // esbuild, or the OPFS worker glue breaks.
+    optimizeDeps: { exclude: ['@sqlite.org/sqlite-wasm'] },
+    worker: { format: 'es' },
     // Project site → base = /<repo>/; dev and preview = '' (root).
     base: process.env.BASE_PATH || ''
   };

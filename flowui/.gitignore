@@ -21,3 +21,6 @@ npm-debug.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Generated wasm-bindgen glue (copied by scripts/copy-wasm.sh)
+src/lib/browser/wasm/

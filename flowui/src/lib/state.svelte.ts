@@ -1,4 +1,4 @@
-import { MemoryStore } from './memory';
+import { createBrowserClient } from './browser/client';
 import { RemoteStore } from './remote';
 import type { FlowStore, NewNode, NodePatch } from './store';
 import type {
@@ -12,9 +12,13 @@ import type {
   WPState
 } from './types';
 
-/** Swap this for a client that talks to the Rust core. */
-/** Memory for the demo build (no backend); the real app talks to the core. */
-export let store: FlowStore = import.meta.env.VITE_DEMO ? new MemoryStore() : new RemoteStore();
+// The demo/offline build runs the REAL flowcore engine in-browser (wasm over a
+// durable OPFS SQLite, in a Worker); the networked build talks to flowd/flowd.js
+// over grpc-web. Both are the same RemoteStore over a FlowService client — only
+// the transport differs.
+export let store: FlowStore = import.meta.env.VITE_DEMO
+  ? new RemoteStore(createBrowserClient())
+  : new RemoteStore();
 
 /** Swap the store (tests inject a mocked FlowStore). */
 export function setStore(s: FlowStore) {
