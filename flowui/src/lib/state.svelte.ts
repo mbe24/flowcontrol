@@ -1,3 +1,5 @@
+import { Code, ConnectError } from '@connectrpc/connect';
+
 import { createBrowserClient } from './browser/client';
 import { RemoteStore } from './remote';
 import type { FlowStore, NewNode, NodePatch } from './store';
@@ -71,6 +73,15 @@ export const app = $state({
   loading: true,
   error: '' as string,
 
+  /**
+   * Connection to the daemon. On a transport drop we keep the last snapshot and
+   * flip to 'disconnected' + a reconnect poll — never a blank page (see
+   * design.daemon-lifecycle.md). Always 'connected' for the in-browser store.
+   */
+  connection: 'connected' as 'connected' | 'disconnected',
+  /** Unix ms of the last successful sync, for the "last synced …" banner. */
+  lastSyncedAt: 0,
+
   projects: [] as Project[],
   projectId: 'prj-travel',
   nodes: [] as FlowNode[],
@@ -135,6 +146,46 @@ export const app = $state({
 
 export const isMobile = () => app.width < MOBILE_BP;
 
+// ── connection / degrade-and-reconnect ───────────────────────────────────────
+
+function synced() {
+  app.connection = 'connected';
+  app.lastSyncedAt = Date.now();
+  app.error = '';
+}
+
+/** A transport drop (daemon gone) vs a real domain error — only the former degrades. */
+function isTransportDown(e: unknown): boolean {
+  return e instanceof ConnectError && (e.code === Code.Unavailable || e.code === Code.DeadlineExceeded);
+}
+
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Flip to disconnected and start (once) a poll that retries until the daemon answers. */
+function scheduleReconnect() {
+  app.connection = 'disconnected';
+  if (reconnectTimer) return;
+  const tick = async () => {
+    reconnectTimer = null;
+    if (!(await retryNow())) reconnectTimer = setTimeout(tick, 2000);
+  };
+  reconnectTimer = setTimeout(tick, 2000);
+}
+
+/** One reconnect attempt: re-fetch the current view. Exposed for the banner + tests. */
+export async function retryNow(): Promise<boolean> {
+  try {
+    app.projects = await store.projects();
+    await refreshCore();
+    synced();
+    return true;
+  } catch (e) {
+    if (isTransportDown(e)) return false;
+    app.error = String(e);
+    return false;
+  }
+}
+
 export async function boot() {
   app.theme = stored<'dark' | 'light'>(THEME_KEY, 'dark');
   app.panelMode = stored<PanelMode>(PANEL_KEY, 'peek');
@@ -147,7 +198,8 @@ export async function boot() {
     app.projects = await store.projects();
     await load(app.projectId);
   } catch (e) {
-    app.error = String(e);
+    if (isTransportDown(e)) scheduleReconnect();
+    else app.error = String(e);
   }
 }
 
@@ -156,28 +208,24 @@ export async function load(projectId: string) {
   app.projectId = projectId;
   app.projectMenuOpen = false;
   try {
-    const [nodes, deps, activity] = await Promise.all([
-      store.nodes(projectId),
-      store.dependencies(projectId),
-      store.activity(projectId)
-    ]);
-    app.nodes = nodes;
-    app.deps = deps;
-    app.activity = activity;
-    for (const n of nodes) {
+    await refreshCore();
+    for (const n of app.nodes) {
       if (n.type === 'WORK_PACKAGE' && n.state === 'ACTIVE') app.expandedWp[n.id] = true;
     }
-    if (app.selectedId && !nodes.some((n) => n.id === app.selectedId)) {
-      app.selectedId = nodes.find((n) => n.type === 'TASK')?.id ?? null;
+    if (app.selectedId && !app.nodes.some((n) => n.id === app.selectedId)) {
+      app.selectedId = app.nodes.find((n) => n.type === 'TASK')?.id ?? null;
     }
+    synced();
   } catch (e) {
-    app.error = String(e);
+    if (isTransportDown(e)) scheduleReconnect(); // keep the last snapshot on screen
+    else app.error = String(e);
   } finally {
     app.loading = false;
   }
 }
 
-async function refresh() {
+/** Fetch the current project's graph into `app`. Throws on failure (caller degrades). */
+async function refreshCore() {
   const [nodes, deps, activity] = await Promise.all([
     store.nodes(app.projectId),
     store.dependencies(app.projectId),
@@ -186,6 +234,16 @@ async function refresh() {
   app.nodes = nodes;
   app.deps = deps;
   app.activity = activity;
+}
+
+async function refresh() {
+  try {
+    await refreshCore();
+    synced();
+  } catch (e) {
+    if (isTransportDown(e)) scheduleReconnect(); // keep last snapshot, poll to recover
+    else throw e;
+  }
 }
 
 let lastChange: { id: string; prev: Status } | null = null;

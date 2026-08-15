@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { app, boot, closeOverlays } from './lib/state.svelte';
+  import { app, boot, closeOverlays, retryNow } from './lib/state.svelte';
+  import { relative } from './lib/remote';
   import Rail from './components/Rail.svelte';
   import TopBar from './components/TopBar.svelte';
   import FilterBar from './components/FilterBar.svelte';
@@ -78,6 +79,14 @@
     <Rail />
   {/if}
   <div class="main">
+    {#if app.connection === 'disconnected'}
+      <div class="conn-banner" role="status">
+        <span
+          >Disconnected{app.lastSyncedAt ? ` — last synced ${relative(app.lastSyncedAt / 1000)}` : ''} · read-only</span
+        >
+        <button onclick={() => retryNow()}>Retry</button>
+      </div>
+    {/if}
     <TopBar />
     {#if !mobile}
       <FilterBar />
@@ -174,5 +183,30 @@
   }
   .blocked {
     color: var(--blocked);
+  }
+  /* Degraded, not alarming: informs without shouting. Sits above the top bar. */
+  .conn-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--fg2);
+    background: var(--panel2);
+    border-bottom: 1px solid var(--border);
+    box-shadow: inset 3px 0 0 var(--deferred);
+  }
+  .conn-banner button {
+    font: inherit;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2px 10px;
+    cursor: pointer;
+  }
+  .conn-banner button:hover {
+    background: var(--hover);
   }
 </style>

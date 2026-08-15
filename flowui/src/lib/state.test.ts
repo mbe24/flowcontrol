@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { app, createNode, createProject, moveNode, passesAll, setStore } from './state.svelte';
+import { Code, ConnectError } from '@connectrpc/connect';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { app, createNode, createProject, load, moveNode, passesAll, retryNow, setStore } from './state.svelte';
 import type { FlowStore } from './store';
 
 function mockStore() {
@@ -61,5 +62,57 @@ describe('new UI actions dispatch to the store', () => {
     app.statusFilter = ['DONE'];
     expect(passesAll({ status: 'DONE' } as never)).toBe(true);
     expect(passesAll({ status: 'READY' } as never)).toBe(false);
+  });
+});
+
+describe('degrade-and-reconnect on a transport drop', () => {
+  beforeEach(() => {
+    vi.useFakeTimers(); // freeze the reconnect poll; we drive retryNow() directly
+    app.connection = 'connected';
+    app.error = '';
+    app.nodes = [];
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const down = () => async () => {
+    throw new ConnectError('daemon gone', Code.Unavailable);
+  };
+
+  it('keeps the last snapshot and flips to disconnected, then recovers', async () => {
+    const healthy = mockStore();
+    (healthy.nodes as unknown) = vi.fn(async () => [{ id: 'T-1', type: 'TASK', status: 'READY' }]);
+    setStore(healthy);
+    await load('prj-travel');
+    expect(app.connection).toBe('connected');
+    expect(app.nodes).toHaveLength(1);
+
+    // Daemon drops: every read throws Unavailable.
+    const dead = mockStore();
+    (dead.nodes as unknown) = vi.fn(down());
+    (dead.dependencies as unknown) = vi.fn(down());
+    (dead.activity as unknown) = vi.fn(down());
+    setStore(dead);
+    await load('prj-travel');
+    expect(app.connection).toBe('disconnected');
+    expect(app.nodes).toHaveLength(1); // last snapshot retained, NOT cleared
+    expect(app.error).toBe(''); // no dead-end error
+
+    // Daemon returns: an explicit retry reconnects and re-syncs.
+    setStore(healthy);
+    const ok = await retryNow();
+    expect(ok).toBe(true);
+    expect(app.connection).toBe('connected');
+    expect(app.lastSyncedAt).toBeGreaterThan(0);
+  });
+
+  it('a real domain error does not trigger the disconnected banner', async () => {
+    const store = mockStore();
+    (store.nodes as unknown) = vi.fn(async () => {
+      throw new ConnectError('bad argument', Code.InvalidArgument);
+    });
+    setStore(store);
+    await load('prj-travel');
+    expect(app.connection).toBe('connected'); // not a transport drop
+    expect(app.error).toContain('bad argument');
   });
 });
