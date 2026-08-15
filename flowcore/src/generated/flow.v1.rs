@@ -1048,5 +1048,7 @@ impl EventKind {
         }
     }
 }
-include!("flow.v1.tonic.rs");
 // @@protoc_insertion_point(module)
+// NOTE: the tonic service `include!("flow.v1.tonic.rs")` was moved to
+// flowcore/src/lib.rs and gated behind the `grpc` feature, so the default
+// (wasm) build is messages-only. Re-strip this line after `buf generate`.

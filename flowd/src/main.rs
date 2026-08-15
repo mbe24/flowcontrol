@@ -10,10 +10,11 @@ use clap::Parser;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 
+use flowcore::store::SqliteStore;
 use flowd::db;
 use flowd::generated::flow_v1::flow_service_server::FlowServiceServer as ServerTonic;
 use flowd::grpc::FlowServiceServer;
-use flowd::store::{DynStore, SqliteStore};
+use flowd::store::{DynStore, NativeStore};
 
 /// FlowControl core daemon.
 #[derive(Parser, Debug)]
@@ -70,7 +71,7 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         info!("seeded fixture data");
     }
 
-    let store: DynStore = std::sync::Arc::new(SqliteStore::new(conn));
+    let store: DynStore = std::sync::Arc::new(NativeStore::new(SqliteStore::new(conn)));
     let grpc_service = ServerTonic::new(FlowServiceServer::new(store));
     // tonic-web decodes HTTP/1.1 grpc-web (browser) while raw gRPC over HTTP/2
     // (TUI) passes straight through; into_router() exposes the gRPC routes as an

@@ -8,7 +8,7 @@
 
 use flowd::db;
 use flowd::generated::flow_v1 as pb;
-use flowd::store::{SqliteStore, Store};
+use flowd::store::{NativeStore, SqliteStore, Store};
 use proptest::prelude::*;
 
 fn meta() -> Option<pb::WriteMeta> {
@@ -21,9 +21,9 @@ fn meta() -> Option<pb::WriteMeta> {
 /// Build a project of `decls.len()` tasks under one work package, set their
 /// declared statuses, and add each edge as blocker=min→blocked=max (acyclic).
 /// Returns (store, project_id, task_ids).
-async fn build(decls: &[u8], edges: &[(usize, usize)]) -> (SqliteStore, String, Vec<String>) {
+async fn build(decls: &[u8], edges: &[(usize, usize)]) -> (NativeStore, String, Vec<String>) {
     let conn = db::open(":memory:").unwrap();
-    let store = SqliteStore::new(conn);
+    let store = NativeStore::new(SqliteStore::new(conn));
     let proj = store
         .create_project(pb::CreateProjectRequest {
             meta: meta(),

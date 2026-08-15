@@ -1,13 +1,9 @@
-//! FlowControl core daemon (`flowd`).
+//! FlowControl core daemon (`flowd`) — the native gRPC edge over `flowcore`.
 
-pub mod db;
-pub mod error;
-pub mod generated {
-    pub mod flow_v1 {
-        // flow.v1.rs ends with `include!("flow.v1.tonic.rs")`, so this single
-        // include pulls in both the message types and the tonic service stubs.
-        include!("generated/flow.v1.rs");
-    }
-}
+// Re-export the core's modules so `grpc`, `main`, and tests keep `crate::` paths
+// (`crate::db`, `crate::error`, `crate::generated`). The tonic `FlowService` stubs
+// under `generated` are present because this crate enables `flowcore/grpc`.
+pub use flowcore::{db, error, generated};
+
 pub mod grpc;
 pub mod store;

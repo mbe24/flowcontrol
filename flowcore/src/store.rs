@@ -1,27 +1,23 @@
-//! SQLite implementation of `Store`, using rusqlite.
+//! The synchronous SQLite store — the heart of `flowcore`, target-agnostic and
+//! wasm-compilable (no tokio, no tonic here).
 //!
-//! The store is **synchronous** (rusqlite/SQLite is a synchronous in-process
-//! library) behind a single `Mutex<Connection>` — matching the actual load (a
-//! local single-user daemon) and giving deterministic, single-writer ordering
-//! that the future Node/browser hosts share. The `Store` trait stays `async` so
-//! the tonic edge is unchanged; each method's body holds no `.await`, so the
-//! `MutexGuard` never crosses a suspension point.
+//! Each public `*_locked` method takes a single `Mutex<Connection>` and runs one
+//! operation to completion (no `.await`). The native `flowd` edge wraps these in
+//! `spawn_blocking` + an async trait; the wasm host calls [`SqliteStore::dispatch`]
+//! directly. Single-writer ordering matches the actual load (a local, single-user
+//! daemon) and is shared by every host.
 //!
 //! Every mutation runs inside one transaction (`unchecked_transaction`, which
-//! rolls back on `Drop` unless committed) — an atomicity upgrade over the old
-//! per-statement autocommit path. Errors carry a [`DomainError`] whose `Code` is
-//! classified from the message, preserving the exact taxonomy the gRPC edge used.
+//! rolls back on `Drop` unless committed). Errors carry a [`DomainError`] whose
+//! `Code` is classified from the message, preserving one taxonomy across hosts.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use super::Store;
 use crate::error::DomainError;
 use crate::generated::flow_v1 as pb;
-use crate::store::watch::{self, Notified, Notifier};
-use tokio::sync::broadcast;
 
 type DResult<T> = Result<T, DomainError>;
 
@@ -53,19 +49,18 @@ fn effective_status(s: &str) -> i32 {
 }
 
 /// SQLite-backed store. Cheap to clone: wraps an `Arc<Mutex<Connection>>`.
+/// Synchronous and target-agnostic — no notifier here (Watch fan-out is a native
+/// concern owned by `flowd`'s edge, which reads the returned `Mutation`).
 #[derive(Clone)]
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
-    notifier: Notifier,
 }
 
 impl SqliteStore {
     /// Wrap an already-migrated connection.
     pub fn new(conn: Connection) -> Self {
-        let (notifier, _) = watch::channel(256);
         Self {
             conn: Arc::new(Mutex::new(conn)),
-            notifier,
         }
     }
 
@@ -82,12 +77,10 @@ impl SqliteStore {
 }
 
 /// Synchronous store logic. Each `*_locked` method takes the connection lock and
-/// runs one operation to completion (no `.await`). The async `Store` impl below
-/// wraps each in `spawn_blocking` so SQLite never blocks the tokio reactor. These
-/// methods are the seed of the future `flow-core` (they'll take a `Sql` seam
-/// instead of `self.conn` in Phase 2's core/edge split).
+/// runs one operation to completion (no `.await`). `flowd`'s async edge offloads
+/// each onto `spawn_blocking`; the wasm host calls `dispatch` (below).
 impl SqliteStore {
-    fn list_projects_locked(&self, include_archived: bool) -> DResult<Vec<pb::Project>> {
+    pub fn list_projects_locked(&self, include_archived: bool) -> DResult<Vec<pb::Project>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, COALESCE(archived_at,0) AS archived_at, created_at
@@ -99,7 +92,7 @@ impl SqliteStore {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    fn get_snapshot_locked(&self, project_id: &str) -> DResult<pb::GetSnapshotResponse> {
+    pub fn get_snapshot_locked(&self, project_id: &str) -> DResult<pb::GetSnapshotResponse> {
         let conn = self.conn.lock().unwrap();
 
         // Project (may be absent).
@@ -173,7 +166,7 @@ impl SqliteStore {
         })
     }
 
-    fn events_after_locked(&self, project_id: &str, from_seq: i64) -> DResult<Vec<pb::Event>> {
+    pub fn events_after_locked(&self, project_id: &str, from_seq: i64) -> DResult<Vec<pb::Event>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT seq, project_id, COALESCE(node_id,'') AS node_id, kind, author, summary, payload AS payload_json, created_at
@@ -184,7 +177,7 @@ impl SqliteStore {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    fn poll_changes_locked(
+    pub fn poll_changes_locked(
         &self,
         project_id: &str,
         after_seq: i64,
@@ -206,7 +199,7 @@ impl SqliteStore {
         Ok(pb::PollChangesResponse { events, seq })
     }
 
-    fn list_events_locked(
+    pub fn list_events_locked(
         &self,
         project_id: &str,
         node_id: &str,
@@ -236,7 +229,12 @@ impl SqliteStore {
         Ok((rows, has_more))
     }
 
-    fn search_locked(&self, project_id: &str, query: &str, limit: i32) -> DResult<Vec<pb::Node>> {
+    pub fn search_locked(
+        &self,
+        project_id: &str,
+        query: &str,
+        limit: i32,
+    ) -> DResult<Vec<pb::Node>> {
         let conn = self.conn.lock().unwrap();
         let mut nodes = {
             let mut stmt = conn.prepare(
@@ -259,7 +257,7 @@ impl SqliteStore {
         Ok(nodes)
     }
 
-    fn create_node_locked(&self, req: pb::CreateNodeRequest) -> DResult<pb::Mutation> {
+    pub fn create_node_locked(&self, req: pb::CreateNodeRequest) -> DResult<pb::Mutation> {
         let conn = self.conn.lock().unwrap();
         if let Some(hit) =
             check_idempotency_created(&conn, &req.project_id, idem_key(req.meta.as_ref()))?
@@ -313,16 +311,10 @@ impl SqliteStore {
             &node_id,
         )?;
         tx.commit()?;
-        finish_mutation(
-            &conn,
-            &self.notifier,
-            &req.project_id,
-            vec![event],
-            vec![node_id],
-        )
+        finish_mutation(&conn, &req.project_id, vec![event], vec![node_id])
     }
 
-    fn update_node_locked(&self, req: pb::UpdateNodeRequest) -> DResult<pb::Mutation> {
+    pub fn update_node_locked(&self, req: pb::UpdateNodeRequest) -> DResult<pb::Mutation> {
         let conn = self.conn.lock().unwrap();
         let current = fetch_node(&conn, &req.node_id)?
             .ok_or_else(|| DomainError::from_db_message("node not found"))?;
@@ -398,16 +390,10 @@ impl SqliteStore {
         )?;
         record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
         tx.commit()?;
-        finish_mutation(
-            &conn,
-            &self.notifier,
-            &project_id,
-            vec![event],
-            vec![req.node_id.clone()],
-        )
+        finish_mutation(&conn, &project_id, vec![event], vec![req.node_id.clone()])
     }
 
-    fn delete_node_locked(&self, req: pb::DeleteNodeRequest) -> DResult<pb::Mutation> {
+    pub fn delete_node_locked(&self, req: pb::DeleteNodeRequest) -> DResult<pb::Mutation> {
         let conn = self.conn.lock().unwrap();
         let current = fetch_node(&conn, &req.node_id)?
             .ok_or_else(|| DomainError::from_db_message("node not found"))?;
@@ -481,10 +467,10 @@ impl SqliteStore {
         let last_seq = events.last().map(|e| e.seq).unwrap_or(0);
         record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), last_seq)?;
         tx.commit()?;
-        finish_mutation(&conn, &self.notifier, &project_id, events, dependents)
+        finish_mutation(&conn, &project_id, events, dependents)
     }
 
-    fn set_status_locked(&self, req: pb::SetStatusRequest) -> DResult<pb::Mutation> {
+    pub fn set_status_locked(&self, req: pb::SetStatusRequest) -> DResult<pb::Mutation> {
         let conn = self.conn.lock().unwrap();
         let current = fetch_node(&conn, &req.node_id)?
             .ok_or_else(|| DomainError::from_db_message("node not found"))?;
@@ -519,10 +505,10 @@ impl SqliteStore {
         tx.commit()?;
         let mut affected = vec![req.node_id.clone()];
         affected.extend(dependents);
-        finish_mutation(&conn, &self.notifier, &project_id, vec![event], affected)
+        finish_mutation(&conn, &project_id, vec![event], affected)
     }
 
-    fn add_dependency_locked(&self, req: pb::AddDependencyRequest) -> DResult<pb::Mutation> {
+    pub fn add_dependency_locked(&self, req: pb::AddDependencyRequest) -> DResult<pb::Mutation> {
         let conn = self.conn.lock().unwrap();
         let project_id = project_of(&conn, &req.blocker_id)?;
         if let Some(seq) = check_idempotency(&conn, &project_id, idem_key(req.meta.as_ref()))? {
@@ -550,14 +536,16 @@ impl SqliteStore {
         tx.commit()?;
         finish_mutation(
             &conn,
-            &self.notifier,
             &project_id,
             vec![event],
             vec![req.blocked_id.clone()],
         )
     }
 
-    fn remove_dependency_locked(&self, req: pb::RemoveDependencyRequest) -> DResult<pb::Mutation> {
+    pub fn remove_dependency_locked(
+        &self,
+        req: pb::RemoveDependencyRequest,
+    ) -> DResult<pb::Mutation> {
         let conn = self.conn.lock().unwrap();
         let project_id = project_of(&conn, &req.blocker_id)?;
         if let Some(seq) = check_idempotency(&conn, &project_id, idem_key(req.meta.as_ref()))? {
@@ -585,14 +573,16 @@ impl SqliteStore {
         tx.commit()?;
         finish_mutation(
             &conn,
-            &self.notifier,
             &project_id,
             vec![event],
             vec![req.blocked_id.clone()],
         )
     }
 
-    fn report_condition_locked(&self, req: pb::ReportConditionRequest) -> DResult<pb::Mutation> {
+    pub fn report_condition_locked(
+        &self,
+        req: pb::ReportConditionRequest,
+    ) -> DResult<pb::Mutation> {
         let conn = self.conn.lock().unwrap();
         let current = fetch_node(&conn, &req.node_id)?
             .ok_or_else(|| DomainError::from_db_message("node not found"))?;
@@ -630,16 +620,10 @@ impl SqliteStore {
         )?;
         record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
         tx.commit()?;
-        finish_mutation(
-            &conn,
-            &self.notifier,
-            &project_id,
-            vec![event],
-            vec![req.node_id.clone()],
-        )
+        finish_mutation(&conn, &project_id, vec![event], vec![req.node_id.clone()])
     }
 
-    fn set_verdict_locked(&self, req: pb::SetVerdictRequest) -> DResult<pb::Mutation> {
+    pub fn set_verdict_locked(&self, req: pb::SetVerdictRequest) -> DResult<pb::Mutation> {
         let conn = self.conn.lock().unwrap();
         let current = fetch_node(&conn, &req.node_id)?
             .ok_or_else(|| DomainError::from_db_message("node not found"))?;
@@ -684,16 +668,10 @@ impl SqliteStore {
         )?;
         record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
         tx.commit()?;
-        finish_mutation(
-            &conn,
-            &self.notifier,
-            &project_id,
-            vec![event],
-            vec![req.node_id.clone()],
-        )
+        finish_mutation(&conn, &project_id, vec![event], vec![req.node_id.clone()])
     }
 
-    fn add_comment_locked(&self, req: pb::AddCommentRequest) -> DResult<pb::Mutation> {
+    pub fn add_comment_locked(&self, req: pb::AddCommentRequest) -> DResult<pb::Mutation> {
         let conn = self.conn.lock().unwrap();
         let current = fetch_node(&conn, &req.node_id)?
             .ok_or_else(|| DomainError::from_db_message("node not found"))?;
@@ -721,16 +699,10 @@ impl SqliteStore {
         )?;
         record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), event.seq)?;
         tx.commit()?;
-        finish_mutation(
-            &conn,
-            &self.notifier,
-            &project_id,
-            vec![event],
-            vec![req.node_id.clone()],
-        )
+        finish_mutation(&conn, &project_id, vec![event], vec![req.node_id.clone()])
     }
 
-    fn undo_locked(&self, req: pb::UndoRequest) -> DResult<pb::Mutation> {
+    pub fn undo_locked(&self, req: pb::UndoRequest) -> DResult<pb::Mutation> {
         const EV: &str = "SELECT seq, project_id, COALESCE(node_id,'') AS node_id, kind, author, summary, payload AS payload_json, created_at FROM events WHERE project_id = ?1 ";
         let conn = self.conn.lock().unwrap();
         let event = if req.seq > 0 {
@@ -851,10 +823,10 @@ impl SqliteStore {
         )?;
         record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), inverse.seq)?;
         tx.commit()?;
-        finish_mutation(&conn, &self.notifier, &project_id, vec![inverse], affected)
+        finish_mutation(&conn, &project_id, vec![inverse], affected)
     }
 
-    fn move_node_locked(&self, req: pb::MoveNodeRequest) -> DResult<pb::Mutation> {
+    pub fn move_node_locked(&self, req: pb::MoveNodeRequest) -> DResult<pb::Mutation> {
         let conn = self.conn.lock().unwrap();
         let current = fetch_node(&conn, &req.node_id)?
             .ok_or_else(|| DomainError::from_db_message("node not found"))?;
@@ -960,10 +932,10 @@ impl SqliteStore {
         let last_seq = events.last().map(|e| e.seq).unwrap_or(0);
         record_idempotency(&tx, &project_id, idem_key(req.meta.as_ref()), last_seq)?;
         tx.commit()?;
-        finish_mutation(&conn, &self.notifier, &project_id, events, affected)
+        finish_mutation(&conn, &project_id, events, affected)
     }
 
-    fn create_project_locked(&self, req: pb::CreateProjectRequest) -> DResult<pb::Project> {
+    pub fn create_project_locked(&self, req: pb::CreateProjectRequest) -> DResult<pb::Project> {
         let conn = self.conn.lock().unwrap();
         // Sentinel-scoped idempotency ('' scope): projects log no event and the id
         // is minted here, so a retry dedups under '' and returns the created row.
@@ -986,7 +958,7 @@ impl SqliteStore {
             .ok_or_else(|| DomainError::from_db_message("created project not found"))
     }
 
-    fn update_project_locked(&self, req: pb::UpdateProjectRequest) -> DResult<pb::Project> {
+    pub fn update_project_locked(&self, req: pb::UpdateProjectRequest) -> DResult<pb::Project> {
         let conn = self.conn.lock().unwrap();
         if fetch_project(&conn, &req.project_id)?.is_none() {
             return Err(DomainError::from_db_message("project not found"));
@@ -1026,7 +998,7 @@ impl SqliteStore {
             .ok_or_else(|| DomainError::from_db_message("project not found"))
     }
 
-    fn archive_project_locked(&self, req: pb::ArchiveProjectRequest) -> DResult<pb::Project> {
+    pub fn archive_project_locked(&self, req: pb::ArchiveProjectRequest) -> DResult<pb::Project> {
         let conn = self.conn.lock().unwrap();
         if fetch_project(&conn, &req.project_id)?.is_none() {
             return Err(DomainError::from_db_message("project not found"));
@@ -1046,128 +1018,6 @@ impl SqliteStore {
         tx.commit()?;
         fetch_project(&conn, &req.project_id)?
             .ok_or_else(|| DomainError::from_db_message("project not found"))
-    }
-}
-
-/// Run a blocking store operation off the tokio reactor, mapping a task panic to
-/// an internal error. SQLite is synchronous; offloading keeps it from stalling
-/// the async runtime under concurrent load (see plan/design.hosting-tenancy.md).
-async fn offload<T, F>(f: F) -> DResult<T>
-where
-    F: FnOnce() -> DResult<T> + Send + 'static,
-    T: Send + 'static,
-{
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| DomainError::internal(format!("db task panicked: {e}")))?
-}
-
-/// The async `Store` edge: thin wrappers that offload each synchronous `*_locked`
-/// operation onto the blocking pool. The trait stays async so a future remote-DB
-/// backend (Postgres/libSQL/D1) can implement it natively — the sync-ness lives
-/// only in the `*_locked` methods, which become `flow-core` in Phase 2.
-#[::async_trait::async_trait]
-impl Store for SqliteStore {
-    async fn list_projects(&self, include_archived: bool) -> DResult<Vec<pb::Project>> {
-        let this = self.clone();
-        offload(move || this.list_projects_locked(include_archived)).await
-    }
-    async fn get_snapshot(&self, project_id: &str) -> DResult<pb::GetSnapshotResponse> {
-        let this = self.clone();
-        let project_id = project_id.to_string();
-        offload(move || this.get_snapshot_locked(&project_id)).await
-    }
-    async fn events_after(&self, project_id: &str, from_seq: i64) -> DResult<Vec<pb::Event>> {
-        let this = self.clone();
-        let project_id = project_id.to_string();
-        offload(move || this.events_after_locked(&project_id, from_seq)).await
-    }
-    async fn poll_changes(
-        &self,
-        project_id: &str,
-        after_seq: i64,
-        limit: i32,
-    ) -> DResult<pb::PollChangesResponse> {
-        let this = self.clone();
-        let project_id = project_id.to_string();
-        offload(move || this.poll_changes_locked(&project_id, after_seq, limit)).await
-    }
-    async fn list_events(
-        &self,
-        project_id: &str,
-        node_id: &str,
-        before_seq: i64,
-        limit: i32,
-    ) -> DResult<(Vec<pb::Event>, bool)> {
-        let this = self.clone();
-        let project_id = project_id.to_string();
-        let node_id = node_id.to_string();
-        offload(move || this.list_events_locked(&project_id, &node_id, before_seq, limit)).await
-    }
-    async fn search(&self, project_id: &str, query: &str, limit: i32) -> DResult<Vec<pb::Node>> {
-        let this = self.clone();
-        let project_id = project_id.to_string();
-        let query = query.to_string();
-        offload(move || this.search_locked(&project_id, &query, limit)).await
-    }
-    fn subscribe(&self) -> broadcast::Receiver<Notified> {
-        self.notifier.subscribe()
-    }
-    async fn create_node(&self, req: pb::CreateNodeRequest) -> DResult<pb::Mutation> {
-        let this = self.clone();
-        offload(move || this.create_node_locked(req)).await
-    }
-    async fn update_node(&self, req: pb::UpdateNodeRequest) -> DResult<pb::Mutation> {
-        let this = self.clone();
-        offload(move || this.update_node_locked(req)).await
-    }
-    async fn delete_node(&self, req: pb::DeleteNodeRequest) -> DResult<pb::Mutation> {
-        let this = self.clone();
-        offload(move || this.delete_node_locked(req)).await
-    }
-    async fn set_status(&self, req: pb::SetStatusRequest) -> DResult<pb::Mutation> {
-        let this = self.clone();
-        offload(move || this.set_status_locked(req)).await
-    }
-    async fn add_dependency(&self, req: pb::AddDependencyRequest) -> DResult<pb::Mutation> {
-        let this = self.clone();
-        offload(move || this.add_dependency_locked(req)).await
-    }
-    async fn remove_dependency(&self, req: pb::RemoveDependencyRequest) -> DResult<pb::Mutation> {
-        let this = self.clone();
-        offload(move || this.remove_dependency_locked(req)).await
-    }
-    async fn report_condition(&self, req: pb::ReportConditionRequest) -> DResult<pb::Mutation> {
-        let this = self.clone();
-        offload(move || this.report_condition_locked(req)).await
-    }
-    async fn set_verdict(&self, req: pb::SetVerdictRequest) -> DResult<pb::Mutation> {
-        let this = self.clone();
-        offload(move || this.set_verdict_locked(req)).await
-    }
-    async fn add_comment(&self, req: pb::AddCommentRequest) -> DResult<pb::Mutation> {
-        let this = self.clone();
-        offload(move || this.add_comment_locked(req)).await
-    }
-    async fn undo(&self, req: pb::UndoRequest) -> DResult<pb::Mutation> {
-        let this = self.clone();
-        offload(move || this.undo_locked(req)).await
-    }
-    async fn move_node(&self, req: pb::MoveNodeRequest) -> DResult<pb::Mutation> {
-        let this = self.clone();
-        offload(move || this.move_node_locked(req)).await
-    }
-    async fn create_project(&self, req: pb::CreateProjectRequest) -> DResult<pb::Project> {
-        let this = self.clone();
-        offload(move || this.create_project_locked(req)).await
-    }
-    async fn update_project(&self, req: pb::UpdateProjectRequest) -> DResult<pb::Project> {
-        let this = self.clone();
-        offload(move || this.update_project_locked(req)).await
-    }
-    async fn archive_project(&self, req: pb::ArchiveProjectRequest) -> DResult<pb::Project> {
-        let this = self.clone();
-        offload(move || this.archive_project_locked(req)).await
     }
 }
 
@@ -1275,11 +1125,10 @@ impl SqliteStore {
 
 // ── shared write helpers (free fns over a &Connection; a &Transaction coerces) ─
 
-/// Build the shared mutation payload for a committed write, publish it to Watch
-/// subscribers, and return it as the unary response (one apply-path for both).
+/// Build the shared mutation payload for a committed write. Watch fan-out is a
+/// native-edge concern: `flowd` reads the returned `Mutation` and publishes it.
 fn finish_mutation(
     conn: &Connection,
-    notifier: &Notifier,
     project_id: &str,
     events: Vec<pb::Event>,
     affected_ids: Vec<String>,
@@ -1297,15 +1146,6 @@ fn finish_mutation(
     }
 
     let changed_progress = progress_for(conn, project_id)?;
-
-    let notified = Notified {
-        project_id: project_id.to_string(),
-        seq,
-        events: events.clone(),
-        changed_nodes: changed_nodes.clone(),
-        changed_progress: changed_progress.clone(),
-    };
-    let _ = notifier.send(notified);
 
     Ok(pb::Mutation {
         events,

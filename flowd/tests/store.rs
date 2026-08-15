@@ -3,12 +3,12 @@
 
 use flowd::db;
 use flowd::generated::flow_v1 as pb;
-use flowd::store::{SqliteStore, Store};
+use flowd::store::{NativeStore, SqliteStore, Store};
 
-async fn seeded_store() -> SqliteStore {
+async fn seeded_store() -> NativeStore {
     let conn = db::open(":memory:").expect("db open");
     db::seed(&conn).expect("seed");
-    SqliteStore::new(conn)
+    NativeStore::new(SqliteStore::new(conn))
 }
 
 #[tokio::test]
@@ -620,7 +620,7 @@ async fn search_returns_effective_status() {
 
 /// Create a node and return its id.
 async fn add(
-    store: &SqliteStore,
+    store: &NativeStore,
     project: &str,
     parent: &str,
     kind: pb::NodeKind,

@@ -1,0 +1,6 @@
+# Workspace: the shared `flowcore` (target-agnostic sync core — compiles to wasm)
+# and `flowd` (the native gRPC daemon built on it). A future `flowwasm` cdylib
+# will also depend on `flowcore`.
+[workspace]
+members = ["flowcore", "flowd"]
+resolver = "2"

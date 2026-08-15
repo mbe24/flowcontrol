@@ -6,7 +6,7 @@ use flowd::generated::flow_v1 as pb;
 use flowd::generated::flow_v1::flow_service_client::FlowServiceClient;
 use flowd::generated::flow_v1::flow_service_server::FlowServiceServer;
 use flowd::grpc::FlowServiceServer as FlowImpl;
-use flowd::store::{DynStore, SqliteStore};
+use flowd::store::{DynStore, NativeStore, SqliteStore};
 use tokio::net::TcpListener;
 
 /// Spin up an in-memory DB, seed it, and serve FlowService on a random port.
@@ -14,7 +14,7 @@ use tokio::net::TcpListener;
 async fn spawn_server() -> (FlowServiceClient<tonic::transport::Channel>, u16) {
     let conn = db::open(":memory:").expect("db");
     db::seed(&conn).expect("seed");
-    let store: DynStore = std::sync::Arc::new(SqliteStore::new(conn));
+    let store: DynStore = std::sync::Arc::new(NativeStore::new(SqliteStore::new(conn)));
     let svc = FlowServiceServer::new(FlowImpl::new(store));
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
