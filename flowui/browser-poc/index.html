@@ -1,0 +1,94 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>flowcore OPFS harness</title>
+<style>
+  body { font: 14px/1.5 ui-monospace, monospace; padding: 1rem; }
+  pre { background: #111; color: #0f0; padding: 1rem; border-radius: 6px; white-space: pre-wrap; }
+  button { font: inherit; padding: 0.4rem 0.8rem; }
+</style>
+<h3>flowcore in the browser — OPFS SAHPool (durable)</h3>
+<button id="reset">Reset OPFS (wipe db)</button>
+<pre id="out"></pre>
+<script type="module">
+  const out = document.getElementById("out");
+  const log = (m) => {
+    out.textContent += m + "\n";
+    console.log(m);
+  };
+
+  const w = new Worker("./worker.mjs", { type: "module" });
+  let idc = 0;
+  const pending = new Map();
+  const rpc = (method, req) =>
+    new Promise((res) => {
+      const id = ++idc;
+      pending.set(id, res);
+      w.postMessage({ type: "dispatch", id, method, req });
+    });
+
+  w.onmessage = (ev) => {
+    const m = ev.data;
+    if (m.type === "log") log("[worker] " + m.message);
+    else if (m.type === "error") log("[ERROR] " + m.message);
+    else if (m.type === "booted") {
+      log("BOOTED (previous user_version=" + m.ver + ")");
+      runTests(m.ver);
+    } else if (m.type === "result") {
+      const res = pending.get(m.id);
+      pending.delete(m.id);
+      res(m);
+    }
+  };
+  w.postMessage({ type: "boot" });
+
+  const enc = (s) => Array.from(new TextEncoder().encode(s));
+  // count top-level protobuf field-1 (len-delimited) entries
+  const countField1 = (bytes) => {
+    let n = 0;
+    for (let i = 0; i < bytes.length; ) {
+      if (bytes[i] === 0x0a) {
+        n++;
+        i += 2 + bytes[i + 1];
+      } else break;
+    }
+    return n;
+  };
+
+  async function runTests(prevVer) {
+    const lp = await rpc("ListProjects", new Uint8Array([]));
+    log("ListProjects -> " + (lp.error ? "ERR " + lp.error : lp.len + " bytes, projects=" + countField1(lp.bytes)));
+
+    // SearchRequest{project_id=1:'prj-travel', query=2:'device', limit=3:10}
+    const searchReq = new Uint8Array([0x0a, 10, ...enc("prj-travel"), 0x12, 6, ...enc("device"), 0x18, 10]);
+    const sr = await rpc("Search", searchReq);
+    log("Search 'device' -> " + (sr.error ? "ERR " + sr.error : sr.len + " bytes (FTS5 hit=" + (sr.len > 0) + ")"));
+
+    // CreateNodeRequest{project_id=2, parent_id=3, kind=4(TASK=2), title=5}
+    const title = "browser write @ " + prevVer;
+    const cnReq = new Uint8Array([
+      0x12, 10, ...enc("prj-travel"),
+      0x1a, 7, ...enc("WP-AUTH"),
+      0x20, 2,
+      0x2a, title.length, ...enc(title),
+    ]);
+    const cn = await rpc("CreateNode", cnReq);
+    log("CreateNode (txn + INSERT…RETURNING) -> " + (cn.error ? "ERR " + cn.error : cn.len + " bytes (ok=" + (cn.len > 0) + ")"));
+
+    // Snapshot to count nodes (grows across reloads if durable)
+    const snap = await rpc("GetSnapshot", new Uint8Array([0x0a, 10, ...enc("prj-travel")]));
+    log("GetSnapshot -> " + (snap.error ? "ERR " + snap.error : snap.len + " bytes"));
+
+    log(prevVer >= 1 ? "DURABLE ✓ reused OPFS db from a previous load" : "fresh db this load — reload the page to prove durability");
+    log("DONE");
+  }
+
+  document.getElementById("reset").onclick = async () => {
+    const root = await navigator.storage.getDirectory();
+    // SAHPool stores its files under a private dir; clearing is easiest via the API,
+    // but for the harness just remove everything at the root.
+    for await (const [name] of root.entries()) {
+      try { await root.removeEntry(name, { recursive: true }); } catch {}
+    }
+    log("OPFS wiped — reload to start fresh");
+  };
+</script>
