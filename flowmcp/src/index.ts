@@ -3,42 +3,61 @@
 // primitive in favor of stderr). Must run before anything might log.
 console.log = console.error;
 
+import { ensureDaemon } from "flowdjs";
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createFlowClient, DEFAULT_FLOWD_ADDR } from "./flowd";
 import { tools } from "./tools/all";
 import { registerTools, type ToolDeps } from "./tools/registry";
 
-const addr = process.env.FLOWD_ADDR ?? DEFAULT_FLOWD_ADDR;
-const deps: ToolDeps = {
-  flow: createFlowClient(addr),
-  callTimeoutMs: 10_000,
-  author: process.env.FLOWMCP_AUTHOR ?? "flowmcp",
-};
+/**
+ * Resolve the daemon address. If FLOWD_ADDR is set we connect to it, never spawn
+ * (team mode / dev). Otherwise ensure a shared daemon exists — connect to one
+ * already running (e.g. started by `flow ui`), else spawn flowd.js. This is
+ * best-effort: an agent host may sandbox us so the spawn dies with the MCP, in
+ * which case the next client re-ensures; we fall back to the default addr and
+ * serve degraded (see plan/design.daemon-lifecycle.md).
+ */
+async function resolveAddr(): Promise<string> {
+  if (process.env.FLOWD_ADDR) return process.env.FLOWD_ADDR;
+  try {
+    const session = await ensureDaemon({ spawnedBy: "mcp", readyTimeoutMs: 6_000 });
+    console.error(`[flowmcp] shared daemon at ${session.addr}`);
+    return session.addr;
+  } catch (e) {
+    console.error(`[flowmcp] could not ensure a daemon (${String(e)}); serving degraded`);
+    return DEFAULT_FLOWD_ADDR;
+  }
+}
 
-// Degraded-mode startup: probe flowd but KEEP SERVING if it's down. Hosts launch
-// stdio servers eagerly; exiting would leave the server dead until the host
-// restarts. `server/discover` and `tools/list` work without flowd; each tool call
-// returns a retryable error until it is up.
 void (async () => {
+  const addr = await resolveAddr();
+  const deps: ToolDeps = {
+    flow: createFlowClient(addr),
+    callTimeoutMs: 10_000,
+    author: process.env.FLOWMCP_AUTHOR ?? "flowmcp",
+  };
+
+  // Degraded-mode: probe but KEEP SERVING if it's down. `server/discover` and
+  // `tools/list` work without a daemon; each tool call returns a retryable error
+  // until it is up.
   try {
     await deps.flow.listProjects({ includeArchived: false }, { timeoutMs: 3_000 });
     console.error(`[flowmcp] connected to flowd at ${addr}`);
   } catch {
     console.error(
-      `[flowmcp] flowd unreachable at ${addr} — set FLOWD_ADDR or run ` +
-        "`docker compose up flowd`. Serving anyway; tool calls error until it is up.",
+      `[flowmcp] flowd unreachable at ${addr}. Serving anyway; tool calls error until it is up.`,
     );
   }
-})();
 
-// serveStdio owns the 2026-07-28 vs legacy era negotiation and pins one instance
-// per connection. The factory registers the (static) tool set each time.
-serveStdio(() => {
-  const server = new McpServer(
-    { name: "flowmcp", version: "0.1.0" },
-    { capabilities: { tools: {} } },
-  );
-  registerTools(server, deps, tools);
-  return server;
-});
+  // serveStdio owns the 2026-07-28 vs legacy era negotiation and pins one instance
+  // per connection. The factory registers the (static) tool set each time.
+  serveStdio(() => {
+    const server = new McpServer(
+      { name: "flowmcp", version: "0.1.0" },
+      { capabilities: { tools: {} } },
+    );
+    registerTools(server, deps, tools);
+    return server;
+  });
+})();
