@@ -3,7 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Generated FlowControl v1 gRPC/Connect TypeScript bindings (shared by flowui and flowmcp).",
+  "description": "Generated FlowControl v1 gRPC/Connect TypeScript bindings (shared by flowui, flowmcp, flowdjs).",
+  "exports": {
+    "./flow/v1/*": {
+      "types": "./flow/v1/*.d.ts",
+      "default": "./flow/v1/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["flow"],
   "dependencies": {
     "@bufbuild/protobuf": "^2.13.0"
   }

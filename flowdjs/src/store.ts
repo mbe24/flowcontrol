@@ -1,6 +1,7 @@
 // Loads the flowcore wasm and binds it to a host SQLite, exposing a single
 // bytes-in/bytes-out `dispatch` — "the service minus the socket". The service
 // layer wraps this with the FlowService routes and Watch fan-out.
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -20,12 +21,15 @@ interface WasmModule {
   seed_sql(): string;
 }
 
-/** The wasm-bindgen (nodejs) glue built from `flowwasm`. Override with FLOWWASM_PKG. */
+/** The wasm-bindgen (nodejs) glue built from `flowwasm`. Override with FLOWWASM_PKG.
+ *  Built package: bundled at dist/wasm/. Dev (tsx): the repo's flowwasm/pkg. */
 function wasmPkgPath(): string {
-  return (
-    process.env.FLOWWASM_PKG ??
-    fileURLToPath(new URL("../../flowwasm/pkg/flowwasm.js", import.meta.url))
-  );
+  if (process.env.FLOWWASM_PKG) return process.env.FLOWWASM_PKG;
+  for (const rel of ["./wasm/flowwasm.js", "../../flowwasm/pkg/flowwasm.js"]) {
+    const p = fileURLToPath(new URL(rel, import.meta.url));
+    if (existsSync(p)) return p;
+  }
+  return fileURLToPath(new URL("../../flowwasm/pkg/flowwasm.js", import.meta.url));
 }
 
 /**

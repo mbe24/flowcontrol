@@ -3,7 +3,14 @@
 // two synchronous bridge functions the wasm imports — `__flowHostExec` and
 // `__flowHostQuery` — backed by this connection. SQLite lives HERE, not in the
 // wasm; that is what makes persistence real.
-import { DatabaseSync, type StatementSync } from "node:sqlite";
+import { createRequire } from "node:module";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
+
+// Load node:sqlite via a runtime require, not a static import: bundlers (esbuild)
+// strip the `node:` prefix from static builtin imports, and there is no bare
+// `sqlite` builtin, so a bundled `import … from "node:sqlite"` fails at runtime.
+// The type import above is type-only (erased), so it doesn't hit that path.
+const sqlite = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
 
 export interface Host {
   db: DatabaseSync;
@@ -16,7 +23,7 @@ export interface Host {
  * imports onto `globalThis`. The wasm looks these up lazily at dispatch time.
  */
 export function openHost(dbPath: string, schemaSql: string, seedSql: string | null): Host {
-  const db = new DatabaseSync(dbPath);
+  const db = new sqlite.DatabaseSync(dbPath);
   // FK enforcement is required for the schema's cascade deletes; WAL + busy timeout
   // smooth concurrent reads on a file DB (no-ops on ":memory:").
   db.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");

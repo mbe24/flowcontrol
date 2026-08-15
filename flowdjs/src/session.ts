@@ -130,16 +130,21 @@ export async function isAnotherDaemonLive(): Promise<Session | null> {
 
 // ── ensure (connect, else spawn) ──────────────────────────────────────────────
 
-/** How to launch flowd.js. Overridable for tests / packaged bins via FLOWD_SPAWN_CMD. */
+/** How to launch flowd.js. Overridable for tests / packaged bins via FLOWD_SPAWN_CMD.
+ *  Detects layout from this module's own extension: built dist/*.js runs the compiled
+ *  entry with plain node; dev src/*.ts runs it under tsx. */
 function spawnCommand(): { cmd: string; args: string[] } {
   const override = process.env.FLOWD_SPAWN_CMD;
   if (override) {
     const parts = JSON.parse(override) as string[];
     return { cmd: parts[0]!, args: parts.slice(1) };
   }
-  // Dev default: run this package's entry under tsx.
-  const entry = fileURLToPath(new URL("./index.ts", import.meta.url));
-  return { cmd: process.execPath, args: ["--import", "tsx", entry] };
+  if (fileURLToPath(import.meta.url).endsWith(".ts")) {
+    const entry = fileURLToPath(new URL("./index.ts", import.meta.url));
+    return { cmd: process.execPath, args: ["--import", "tsx", entry] };
+  }
+  const entry = fileURLToPath(new URL("./index.js", import.meta.url));
+  return { cmd: process.execPath, args: [entry] };
 }
 
 /** Best-effort exclusive lock so two clients don't both spawn. Returns a release fn. */
