@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
+    "ui": "tsx src/ui.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
