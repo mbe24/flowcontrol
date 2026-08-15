@@ -10,6 +10,7 @@
     "shared/flowapi"
   ],
   "scripts": {
+    "gen:wasm": "sh scripts/gen-wasm.sh",
     "test:flowd": "node scripts/runner.mjs test:flowd",
     "build:flowd": "node scripts/runner.mjs build:flowd",
     "check:flowd": "node scripts/runner.mjs check:flowd",
