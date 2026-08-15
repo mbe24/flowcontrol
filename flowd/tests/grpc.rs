@@ -12,9 +12,9 @@ use tokio::net::TcpListener;
 /// Spin up an in-memory DB, seed it, and serve FlowService on a random port.
 /// Returns (client, port).
 async fn spawn_server() -> (FlowServiceClient<tonic::transport::Channel>, u16) {
-    let pool = db::open(":memory:").await.expect("db");
-    db::seed(&pool).await.expect("seed");
-    let store: DynStore = std::sync::Arc::new(SqliteStore::from_pool(pool));
+    let conn = db::open(":memory:").expect("db");
+    db::seed(&conn).expect("seed");
+    let store: DynStore = std::sync::Arc::new(SqliteStore::new(conn));
     let svc = FlowServiceServer::new(FlowImpl::new(store));
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");

@@ -1,6 +1,7 @@
 //! The tonic `FlowService` gRPC implementation. Backed by the `Store` seam, so
 //! the handlers are reusable against any future store.
 
+use crate::error::{Code, DomainError};
 use crate::generated::flow_v1 as pb;
 use crate::generated::flow_v1::flow_service_server::FlowService;
 use crate::store::DynStore;
@@ -10,35 +11,17 @@ pub struct FlowServiceServer {
     store: DynStore,
 }
 
-/// Convert a boxed store error into a tonic Status, mapping known store/trigger
-/// messages to codes so clients (and the agent-facing MCP) can tell "don't retry"
-/// (InvalidArgument / FailedPrecondition) from "not found" and transient Internal.
-fn into_status(e: Box<dyn std::error::Error + Send + Sync>) -> tonic::Status {
-    let msg = e.to_string();
-    let m = msg.to_lowercase();
-    if m.contains("not found") {
-        tonic::Status::not_found(msg)
-    } else if m.contains("update_mask cannot be empty")
-        || m.contains("unknown update_mask")
-        || m.contains("requires a target kind")
-        || m.contains("invalid agent result")
-        || m.contains("syntax error") // malformed FTS query from Search
-        || m.contains("fts5")
-    {
-        tonic::Status::invalid_argument(msg)
-    } else if m.contains("invalid parent kind")
-        || m.contains("cross-project")
-        || m.contains("children invalid")
-        || m.contains("its own parent")
-        || m.contains("would create a cycle")
-        || m.contains("has dependents")
-        || m.contains("work package") // "cannot promote or demote a work package"
-        || m.contains("cannot demote")
-        || m.contains("cannot undo")
-    {
-        tonic::Status::failed_precondition(msg)
-    } else {
-        tonic::Status::internal(msg)
+/// Map a store `DomainError` to a tonic Status. The classification lives in
+/// `crate::error` (one taxonomy shared by every host); here we only translate the
+/// `Code` into tonic's status space, so clients (and the agent-facing MCP) can
+/// tell "don't retry" (InvalidArgument / FailedPrecondition) from "not found" and
+/// transient Internal.
+fn into_status(e: DomainError) -> tonic::Status {
+    match e.code {
+        Code::NotFound => tonic::Status::not_found(e.message),
+        Code::InvalidArgument => tonic::Status::invalid_argument(e.message),
+        Code::FailedPrecondition => tonic::Status::failed_precondition(e.message),
+        Code::Internal => tonic::Status::internal(e.message),
     }
 }
 
@@ -88,7 +71,10 @@ impl FlowService for FlowServiceServer {
             .list_events(&req.project_id, &req.node_id, req.before_seq, req.limit)
             .await
             .map_err(into_status)?;
-        Ok(tonic::Response::new(pb::ListEventsResponse { events, has_more }))
+        Ok(tonic::Response::new(pb::ListEventsResponse {
+            events,
+            has_more,
+        }))
     }
 
     async fn search(

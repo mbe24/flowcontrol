@@ -64,13 +64,13 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
 
     // Open the database and run migrations.
     info!(db = %args.db, "opening database");
-    let pool = db::open(&args.db).await?;
+    let conn = db::open(&args.db)?;
     if args.seed {
-        db::seed(&pool).await?;
+        db::seed(&conn)?;
         info!("seeded fixture data");
     }
 
-    let store: DynStore = std::sync::Arc::new(SqliteStore::from_pool(pool));
+    let store: DynStore = std::sync::Arc::new(SqliteStore::new(conn));
     let grpc_service = ServerTonic::new(FlowServiceServer::new(store));
     // tonic-web decodes HTTP/1.1 grpc-web (browser) while raw gRPC over HTTP/2
     // (TUI) passes straight through; into_router() exposes the gRPC routes as an

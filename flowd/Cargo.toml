@@ -19,7 +19,11 @@ tonic = { version = "0.12", features = ["router"] }
 tonic-web = "0.12"
 axum = "0.7"
 prost = "0.13"
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
+# rusqlite (bundled SQLite, compiled from source with FTS5/JSON1/RTREE enabled
+# unconditionally). Chosen over sqlx because it compiles to wasm32 via the
+# `sqlite-wasm-rs` backend, unlocking the Node/browser hosts — sqlx's SQLite is C
+# that does not build for wasm. The store runs it synchronously behind a Mutex.
+rusqlite = { version = "0.32", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

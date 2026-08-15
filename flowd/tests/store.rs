@@ -6,9 +6,9 @@ use flowd::generated::flow_v1 as pb;
 use flowd::store::{SqliteStore, Store};
 
 async fn seeded_store() -> SqliteStore {
-    let pool = db::open(":memory:").await.expect("db open");
-    db::seed(&pool).await.expect("seed");
-    SqliteStore::from_pool(pool)
+    let conn = db::open(":memory:").expect("db open");
+    db::seed(&conn).expect("seed");
+    SqliteStore::new(conn)
 }
 
 #[tokio::test]

@@ -22,8 +22,8 @@ fn meta() -> Option<pb::WriteMeta> {
 /// declared statuses, and add each edge as blocker=min→blocked=max (acyclic).
 /// Returns (store, project_id, task_ids).
 async fn build(decls: &[u8], edges: &[(usize, usize)]) -> (SqliteStore, String, Vec<String>) {
-    let pool = db::open(":memory:").await.unwrap();
-    let store = SqliteStore::from_pool(pool);
+    let conn = db::open(":memory:").unwrap();
+    let store = SqliteStore::new(conn);
     let proj = store
         .create_project(pb::CreateProjectRequest {
             meta: meta(),

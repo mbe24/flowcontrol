@@ -40,7 +40,10 @@ pub struct DomainError {
 
 impl DomainError {
     pub fn new(code: Code, message: impl Into<String>) -> Self {
-        Self { code, message: message.into() }
+        Self {
+            code,
+            message: message.into(),
+        }
     }
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::new(Code::NotFound, message)
@@ -60,7 +63,10 @@ impl DomainError {
     /// exact taxonomy the gRPC edge string-matched before this type existed.
     pub fn from_db_message(message: impl Into<String>) -> Self {
         let message = message.into();
-        Self { code: classify(&message), message }
+        Self {
+            code: classify(&message),
+            message,
+        }
     }
 }
 
@@ -110,17 +116,32 @@ mod tests {
     #[test]
     fn classify_matches_the_old_taxonomy() {
         assert_eq!(classify("node not found"), Code::NotFound);
-        assert_eq!(classify("update_mask cannot be empty"), Code::InvalidArgument);
-        assert_eq!(classify("fts5: syntax error near \"(\""), Code::InvalidArgument);
+        assert_eq!(
+            classify("update_mask cannot be empty"),
+            Code::InvalidArgument
+        );
+        assert_eq!(
+            classify("fts5: syntax error near \"(\""),
+            Code::InvalidArgument
+        );
         assert_eq!(classify("would create a cycle"), Code::FailedPrecondition);
-        assert_eq!(classify("cannot promote or demote a work package"), Code::FailedPrecondition);
-        assert_eq!(classify("cannot undo event kind 7"), Code::FailedPrecondition);
+        assert_eq!(
+            classify("cannot promote or demote a work package"),
+            Code::FailedPrecondition
+        );
+        assert_eq!(
+            classify("cannot undo event kind 7"),
+            Code::FailedPrecondition
+        );
         assert_eq!(classify("disk I/O error"), Code::Internal);
     }
 
     #[test]
     fn explicit_constructors_carry_their_code() {
         assert_eq!(DomainError::not_found("x").code, Code::NotFound);
-        assert_eq!(DomainError::from_db_message("invalid parent kind").code, Code::FailedPrecondition);
+        assert_eq!(
+            DomainError::from_db_message("invalid parent kind").code,
+            Code::FailedPrecondition
+        );
     }
 }
