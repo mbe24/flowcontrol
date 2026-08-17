@@ -1,0 +1,33 @@
+site_name: flowcontrol
+site_description: Dependency-aware task graphs for humans and the agents working alongside them
+site_url: https://flowcontrol.readthedocs.io/
+repo_url: https://github.com/mbe24/flowcontrol
+repo_name: mbe24/flowcontrol
+edit_uri: edit/main/docs/
+docs_dir: docs
+strict: true
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: cyan
+      accent: teal
+  features:
+    - navigation.sections
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Concepts: concepts.md
+  - Installation: installation.md
+  - Front doors: front-doors.md
+  - MCP tools: mcp-tools.md
+  - Architecture: architecture.md
+  - Development: development.md

@@ -7,7 +7,7 @@
 
 [![CI](https://github.com/mbe24/flowcontrol/actions/workflows/ci.yml/badge.svg)](https://github.com/mbe24/flowcontrol/actions/workflows/ci.yml)
 ![npm](https://img.shields.io/badge/npm-not_yet_published-lightgrey)
-![Docs](https://img.shields.io/badge/docs-coming_soon-lightgrey)
+[![Docs](https://readthedocs.org/projects/flowcontrol/badge/?version=latest)](https://flowcontrol.readthedocs.io/en/latest/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-orange.svg)](LICENSE)
 
 **flowcontrol** is a **dependency-aware task graph** for humans and the agents working
@@ -106,8 +106,8 @@ flowui                                    # open the web board (starts the daemo
 
 ## Documentation
 
-Full documentation is on its way. For now, the [Quickstart](#quickstart-from-source) above and
-the in-repo design notes are the reference.
+Full documentation lives at **<https://flowcontrol.readthedocs.io/>** — concepts, installation,
+the MCP tools reference, and the architecture.
 
 ## License
 
