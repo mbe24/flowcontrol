@@ -82,7 +82,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: flowd
+          # The Cargo workspace (and its target/) is at the repo root, not flowd/.
+          workspaces: .
 
       - name: Format
         working-directory: flowd
@@ -98,8 +99,8 @@ jobs:
 
       # Build the flowd binary once here; mcp-integration reuses it (no rebuild).
       # Strip debug symbols — the integration job only needs to RUN it (~15 MB, not ~120).
+      # Run from the repo root: the workspace target/ lives there, not under flowd/.
       - name: Build binary
-        working-directory: flowd
         run: |
           cargo build --bin flowd
           strip target/debug/flowd
@@ -108,7 +109,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: flowd-bin
-          path: flowd/target/debug/flowd
+          path: target/debug/flowd
           retention-days: 1
 
   mcp:
