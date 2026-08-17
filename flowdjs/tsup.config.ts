@@ -1,15 +1,17 @@
 import { defineConfig } from "tsup";
 
 // Two entries: the daemon (index) and the library ensureDaemon/session exports
-// (lib, imported by flowmcp). All dependencies — including @flow/api — stay
-// external (installed via package.json); only our own src is bundled. The wasm
-// glue is NOT a bundle input: store.ts loads it at runtime via createRequire from
-// ./wasm, which scripts/bundle-wasm.mjs copies in after the build.
+// (lib, imported by flowmcp). @flow/api is bundled IN (noExternal) — it's generated
+// protobuf glue we keep internal, never published, so it must ride inside dist.
+// All other deps stay external (installed via package.json). The wasm glue is NOT a
+// bundle input: store.ts loads it at runtime via createRequire from ./wasm, which
+// scripts/bundle-wasm.mjs copies in after the build.
 export default defineConfig({
   entry: ["src/index.ts", "src/lib.ts"],
   format: ["esm"],
   platform: "node",
   target: "node22",
+  noExternal: [/^@flow\/api(\/|$)/],
   dts: { entry: "src/lib.ts" },
   sourcemap: true,
   clean: true,
